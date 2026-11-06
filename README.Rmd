@@ -2,12 +2,17 @@
 title: "Do NA-POPS-corrected point counts reproduce spot-mapping densities? Canadian Breeding Bird Census vs BAM"
 author: "David Iles, assisted by Opus 5.5 and GPT-6 Sol"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
+# The Knit button renders every format below: README.html (full report, code
+# folded) and README.md (displayed by GitHub, figures in README_files/).
+# HTML comes first: its self-contained clean-up removes the README_files
+# folder, so the Markdown figures must be written after it.
+knit: (function(input, ...) rmarkdown::render(input, output_format = "all"))
 output:
-  # Knits (Knit button) to README.md, which GitHub displays on the repository
-  # page. bookdown's markdown_document2 numbers sections, figures and tables and
-  # resolves cross-references; github_document gives GitHub-flavoured Markdown.
-  # Figures are written to README_files/: commit them along with README.md.
-  # Requires the bookdown package.
+  bookdown::html_document2:
+    number_sections: true
+    toc: true
+    toc_float: true
+    code_folding: hide
   bookdown::markdown_document2:
     base_format: rmarkdown::github_document
     number_sections: true
@@ -17,9 +22,10 @@ output:
 ---
 
 ```{r setup, include = FALSE}
-# Code is hidden in README.md (GitHub cannot fold code chunks); it is all in
-# README.Rmd and the preparation scripts.
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5, dpi = 150)
+# Code is shown (folded) in README.html, and hidden in README.md because
+# GitHub cannot fold code chunks
+SHOW_CODE <- knitr::pandoc_to() %in% c("html", "html4", "html5")
+knitr::opts_chunk$set(echo = SHOW_CODE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5, dpi = 150)
 
 library(tidyverse)
 library(sf)
