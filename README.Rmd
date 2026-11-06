@@ -816,7 +816,14 @@ corr_tbl <- p3$species_corrections |>
 
 napops_surveys <- p3$survey_species |> filter(species %in% spp_napops, !is.na(area_km2))
 
+# Share of the variation in log effective area (across all survey x species
+# combinations) explained by species alone; the rest is variation among
+# surveys of the same species
 r2_species <- summary(lm(formula = log(area_km2) ~ species, data = napops_surveys))$r.squared
+
+# Within-species spread: effective area of the 90th vs 10th percentile survey,
+# median across species
+within_species_fold <- median(corr_tbl$area_q90_km2 / corr_tbl$area_q10_km2, na.rm = TRUE)
 area_range <- range(corr_tbl$area_median_km2)
 var_edr    <- var(log(pi * corr_tbl$edr_m^2))
 var_p      <- var(log(corr_tbl$p_median))
@@ -850,7 +857,11 @@ tibble(
 **How to read:**
 
 - **Spread across species.** The corrections differ about `r round(area_range[2] / area_range[1])`-fold between species, so they can substantially re-order species. A rank correlation of `r round(rho_rerank, 2)` between uncorrected and corrected abundance shows how much they actually do.
-- **Within vs between species.** Species identity explains `r pct(r2_species)` of the variation in effective area. With one EDR per species, the variation within a species comes only from availability (survey duration, date and time) and the distance limit. The corrections therefore act mostly *between* species (composition and absolute level), and barely change how sites rank *within* a species.
+- **Within vs between species.** Every survey × species combination has its own effective area, and these vary in two ways:
+  - **Between species.** Each species has its own EDR and its own availability model (how often it sings or calls).
+  - **Within a species, between surveys.** Availability depends on each survey's duration, day of year and time since sunrise, and a distance limit truncates the area sampled (a 50 m count samples much less than an unlimited-distance one). For a typical species, the survey at the 90th percentile of effective area samples about `r round(within_species_fold, 1)` times the area of the survey at the 10th percentile.
+
+  "Species identity explains `r pct(r2_species)`" is the R² of a regression of log effective area on species alone. It means that `r pct(r2_species)` of all the variation in log effective area, across every survey and species, is accounted for by differences between species' average effective areas. The remaining `r pct(1 - r2_species)` is variation among surveys of the same species, from survey protocol (duration, distance limit) and timing (date, time of day). With one EDR per species, none of the within-species variation comes from EDR. So the corrections act mostly *between* species, setting composition and absolute level. Within a species they mainly put surveys run under different protocols on a common footing, and barely change how sites rank.
 - **EDR dominates.** EDR enters squared, and accounts for `r pct(var_edr / (var_edr + var_p))` of the between-species variation, so errors in EDR matter most.
 - **Precision.** EDR *sampling* error alone gives each species' density a 95% interval spanning a factor of only about `r round(median(corr_tbl$density_ci_factor, na.rm = TRUE), 2)`. That greatly understates the real uncertainty, which also includes the choice of distance model, availability, and the NA-POPS release (which has shifted closed-forest EDRs by up to ~25% between releases). For an unlimited-distance count, density scales with 1 / EDR², so a 25% larger EDR lowers density by 1 − 1/1.25² ≈ 36%, and every comparison with CBBC would shift by about that factor.
 
@@ -882,8 +893,26 @@ cor_4a <- bind_rows(
 )
 kable(cor_4a, digits = 2, caption = "Correlation across species of CBBC density with BAM point counts", label = "step3a-1")
 
-kable(with(filter(means_4, territorial), boot_cor_diff(y = cbbc, x1 = uncorrected, x2 = corrected)), digits = 2,
+cor_change <- with(filter(means_4, territorial), boot_cor_diff(y = cbbc, x1 = uncorrected, x2 = corrected))
+kable(cor_change, digits = 2,
       caption = "Territorial species: 95% bootstrap CI for the change in correlation with CBBC, corrected minus uncorrected", label = "step3a-2")
+
+# How much territorial species differ in raw counts and in CBBC density,
+# compared with how much their NA-POPS corrections (median effective area) differ
+species_spread <- means_4 |>
+  filter(territorial, uncorrected > 0) |>
+  left_join(y = select(corr_tbl, species, area_median_km2, edr_m), by = "species")
+
+count_fold        <- max(species_spread$uncorrected) / min(species_spread$uncorrected)
+cbbc_fold         <- max(species_spread$cbbc) / min(species_spread$cbbc)
+correction_fold   <- max(species_spread$area_median_km2) / min(species_spread$area_median_km2)
+edr_range_m       <- range(species_spread$edr_m)
+sd_log_count      <- sd(log(species_spread$uncorrected))
+sd_log_correction <- sd(log(species_spread$area_median_km2))
+
+# Territorial species with the largest EDRs (largest effective areas, so the
+# correction lowers their densities most)
+largest_edr_species <- species_spread |> arrange(desc(edr_m)) |> slice_head(n = 3) |> pull(species)
 
 means_4 |>
   pivot_longer(cols = c(uncorrected, corrected), names_to = "version", values_to = "bam") |>
@@ -904,7 +933,14 @@ means_4 |>
   theme(legend.position = "top")
 ```
 
-**How to read:** if the corrected correlation with CBBC is higher, NA-POPS moves species' relative abundances toward the census. That is independent support for the corrections, separate from their absolute level.
+**How to read:** if the corrected correlation with CBBC is higher, NA-POPS moves species' relative abundances toward the census. That is independent support for the corrections, separate from their absolute level. In this dataset the correction has little room to do so:
+
+- **What a correction can do.** Correcting divides each species' count by its effective area. On the log scales of Figure \@ref(fig:step3a), that shifts each species up or down by the log of its effective area. Species change places only where these shifts are large compared with the gaps between them.
+- **How much species differ.** Among territorial species, mean counts per survey differ about `r round(count_fold)`-fold from the least to the most counted species, and CBBC densities about `r round(cbbc_fold)`-fold. Their corrections (median effective area) differ only about `r round(correction_fold, 1)`-fold. On the log scale, counts vary across species with a standard deviation of `r round(sd_log_count, 2)`, and corrections with `r round(sd_log_correction, 2)`, about `r round(100 * sd_log_correction / sd_log_count)`% as much.
+- **Why EDR differences reorder few species.** EDR ranges from about `r round(edr_range_m[1])` to `r round(edr_range_m[2])` m among these species. Effective area scales with EDR², so that becomes about a `r round((edr_range_m[2] / edr_range_m[1])^2, 1)`-fold difference in area. That is a substantial correction for any one species, and EDR accounts for most of the differences between species' corrections (Table \@ref(tab:step2-stats-1)). But it is small next to the spread of the counts themselves, so it moves only species whose counts were already close. That is why uncorrected and corrected abundance rank species almost identically (Spearman `r round(rho_rerank, 2)`; Table \@ref(tab:step2-stats-1)).
+- **Judge the change by its interval.** The 95% intervals for the change in correlation (Table \@ref(tab:step3a-2)) run from `r round(cor_change$lcl[cor_change$measure == "spearman"], 2)` to `r round(cor_change$ucl[cor_change$measure == "spearman"], 2)` for Spearman and from `r round(cor_change$lcl[cor_change$measure == "pearson_log"], 2)` to `r round(cor_change$ucl[cor_change$measure == "pearson_log"], 2)` for Pearson on the log scale. With `r nrow(species_spread)` species, a correlation of about 0.5 has a standard error of roughly 0.15, so a change of a few hundredths in either direction is noise.
+- **Where the correction does move species.** The species with the largest EDRs (here `r paste(largest_edr_species, collapse = ", ")`) get the largest effective areas, so the correction lowers their densities most. If they were already counted less than their CBBC densities suggest (Figure \@ref(fig:step3a), left panel), the correction moves them further from CBBC. Their low counts then come from something other than detection distance, such as population change since the census, behaviour that morning point counts sample poorly, or one dominant site (Table \@ref(tab:step3-count-ratio-2)), and correcting for detection distance cannot fix that.
+- **What this means.** Here, the differences between species in how their counts compare with CBBC are driven far more by ecology than by detectability, so this composition test has little power to judge the corrections. The absolute comparisons below are more informative about them.
 
 ## How the absolute comparisons work {#absolute-logic}
 
