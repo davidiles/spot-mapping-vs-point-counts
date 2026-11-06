@@ -1,0 +1,1253 @@
+---
+title: "Do NA-POPS-corrected point counts reproduce spot-mapping densities? Canadian Breeding Bird Census vs BAM"
+author: "David Iles, assisted by Opus 5.5 and GPT-6 Sol"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  # Knits (Knit button) to README.md, which GitHub displays on the repository
+  # page. bookdown's markdown_document2 numbers sections, figures and tables and
+  # resolves cross-references; github_document gives GitHub-flavoured Markdown.
+  # Figures are written to README_files/: commit them along with README.md.
+  # Requires the bookdown package.
+  bookdown::markdown_document2:
+    base_format: rmarkdown::github_document
+    number_sections: true
+    toc: true
+    toc_depth: 2
+    html_preview: false
+---
+
+```{r setup, include = FALSE}
+# Code is hidden in README.md (GitHub cannot fold code chunks); it is all in
+# README.Rmd and the preparation scripts.
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5, dpi = 150)
+
+library(tidyverse)
+library(sf)
+library(knitr)
+```
+
+# Overview
+
+This repository compares two ways of estimating breeding-bird density in Canada:
+
+- **Point counts** from the Boreal Avian Modelling (BAM) Project's point-count database, converted to density with detectability corrections from **NA-POPS** (Point count Offsets for Population Sizes of North American landbirds).
+- **Spot mapping** from the **Canadian Breeding Bird Census (CBBC)**, in which observers visited fixed plots repeatedly and mapped territories, giving densities that need no detectability correction.
+
+If the NA-POPS corrections are about right, corrected point counts near CBBC plots should give densities of the same magnitude as the CBBC censuses. It is a plausibility check on the corrections, not a validation of them; the limitations are set out in Section \@ref(purpose).
+
+The rest of this README is the full report, generated from `README.Rmd`. The main results across all comparisons are summarised in the synthesis table near the end.
+
+# Data sources
+
+None of the data are included in this repository. The scripts read them from local paths set at the top of each script (Section \@ref(reproducing)).
+
+| Source | What is used | Notes |
+|---|---|---|
+| **Canadian Breeding Bird Census (CBBC)** | `PLOTS` and `SPECIES` tables: plot location, size, habitat, census year and visits; territory counts per species | Database documented in Kennedy et al. (1999), CWS Technical Report 342. Held by Environment and Climate Change Canada (Canadian Wildlife Service). Census records are filtered for coordinate quality, list completeness, effort, plot size, year and habitat in `P1_prepare_cbbc.R`. |
+| **BAM point-count database (v5)** | Human point counts (no ARU recordings, no eBird checklists) within 1 km of each retained CBBC plot, with survey date, time, duration, distance limit and counts | DuckDB build `03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09`. Access through the BAM Project's data-sharing process. |
+| **NA-POPS** | Species availability (removal) and distance (EDR) models | Through the [`napops`](https://github.com/na-pops/napops) R package; the results release used is reported in Section \@ref(napops-corrections). The intercept-only distance model is used. |
+| **Bird Conservation Regions** | Boundaries for the site map | Optional; the map is drawn without them if the file is absent. |
+
+# Repository structure and workflow {#repository-structure-and-workflow}
+
+```
+spot-mapping-vs-point counts/
+├── *.Rproj            RStudio project (sets the project root used by here::here())
+├── README.Rmd         this report; knits to README.md and README_files/
+├── script/            preparation scripts P1-P3
+├── data/              local input data (not included in the repository)
+└── output/            cached outputs of P1-P3 (not included in the repository)
+```
+
+The analysis has three preparation scripts, each run once with its output cached, followed by this report:
+
+| Step | Script | Prepares | Cached output (in `output/`) |
+|---|---|---|---|
+| 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules (recodes, split taxa, Traill's Flycatcher, non-territorial species) | `P1_cbbc_prepared.rds` |
+| 2 | `script/P2_match_bam_surveys.R` | BAM surveys within 1 km of each retained CBBC plot, survey filters, time since sunrise, counts | `P2_bam_matched.rds` |
+| 3 | `script/P3_napops_corrections.R` | Species compared, NA-POPS availability, EDR and effective area for every survey and species | `P3_napops_corrections.rds` |
+| 4 | `README.Rmd` | This report, knitted to `README.md` | figures in `README_files/` |
+
+Each script and the report define their settings as constants at the top, and record them with their outputs; Section \@ref(settings-used) lists the settings used for this version.
+
+# Reproducing the analysis {#reproducing}
+
+1. Open the RStudio project (the `.Rproj` file in the repository root). All paths inside the project are built with `here::here()`, so they resolve from the project root, whichever folder a script is run from.
+2. Place the input data in `data/`, or set the data paths at the top of each preparation script (CBBC tables in P1, the BAM DuckDB file in P2), and optionally the BCR file at the top of `README.Rmd`.
+3. Install the R packages used: `tidyverse`, `readxl`, `sf`, `DBI`, `duckdb`, `suncalc`, `lutz`, `napops`, `rappdirs`, `here`, `knitr` and `bookdown`.
+4. Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R` and `script/P3_napops_corrections.R`, in that order. Each writes its output to `output/`. Re-run them only when their inputs or settings change; each later script reads the earlier ones' outputs.
+5. Knit `README.Rmd` (in the repository root) with the Knit button. This writes `README.md` and its figures in `README_files/`; commit both so GitHub can display the report.
+
+Because the data are not public, `README.md` shows the results of the author's local run.
+
+# Purpose and logic of this report {#purpose}
+
+**The question.** Point counts become densities only after correcting for birds that were present but not counted. NA-POPS supplies those corrections: availability (the chance a bird sings during the count) and effective detection radius (how far away singing birds are heard). If the corrections are about right, NA-POPS-corrected point counts should give densities close to those from an independent, more intensive method. This report asks whether they do, using Canadian Breeding Bird Census (CBBC) spot-mapping plots as that independent reference.
+
+**Why spot mapping.** CBBC observers visited each plot repeatedly (at least the minimum number of visits set in P1; Table \@ref(tab:step1a-1)) and mapped territories, so CBBC densities are territories per unit area, including fractions of territories crossing the plot edge, with no detectability correction involved. For territorial songbirds detected mainly by song, this is approximately the quantity a corrected point count estimates. The two are not identical: point counts record individuals (a pair, a fledgling or a non-territorial bird adds to the count), whereas spot mapping records territories. Spot mapping also misses some territories, so CBBC is treated as an independent reference rather than the truth.
+
+**Scope.** Species are selected on one criterion: CBBC territories at 10 or more matched sites (set in P3), plus an NA-POPS model, without which counts cannot be corrected. Nothing about BAM detections, availability or EDR is used, so no species is included or excluded because of how well BAM and CBBC agree. Results are summarised for all species and for territorial species separately, because spot mapping cannot census colonial, flocking or non-territorial species as territories.
+
+**Sites compared.** Every comparison between CBBC and BAM uses only CBBC-positive grids, except the community-composition comparison in Step 1 (which needs every species measured over the same sites): for each species, the CBBC sites where spot mapping found territories of that species. Where spot mapping found none but nearby points counted the species, the usual cause is that the points sample different habitat from the plot (for example, forest around a small open or wetland plot), so those site x species combinations say little about detectability. Restricting to CBBC-positive grids selects grids where CBBC density was high partly by chance, which pushes ratios of BAM to CBBC density slightly below 1.
+
+**What the comparison can and cannot show.** It is a plausibility check: whether NA-POPS-corrected point counts give densities of the same magnitude as an independent, intensive census. It cannot validate availability and EDR separately, because detectability error is confounded with population change since the censuses, habitat differences between plots and nearby points, and individuals versus territories. The 95% intervals reported below are **sampling intervals**: they describe how much the results depend on which sites and surveys happened to be available, taking the NA-POPS corrections and the CBBC densities as given. They do not include uncertainty in the corrections themselves (model choice, NA-POPS release, availability), error in the historical CBBC densities, population change or spatial mismatch, and should not be read as the uncertainty in the accuracy of the corrections. Because density scales with 1 / EDR² for unlimited-distance counts, errors in EDR dominate that uncertainty (Step 2).
+
+**What else differs between the two datasets.** Any disagreement mixes detectability error with three things that have nothing to do with it:
+
+- **Time.** CBBC censuses are decades older than the BAM surveys. Populations have changed since, in both directions and by species.
+- **Place and habitat.** BAM surveys within 1 km of a plot are not on the plot, and can sample different habitat.
+- **What is counted.** Point counts record individuals (including pairs, fledglings and non-territorial birds); spot mapping records territories.
+
+The report therefore moves from comparisons that are robust to these differences toward ones that are not, and judges each in light of the last:
+
+1. **Data support and raw agreement.** How much matched data there is, how well replicated, from when and where, and whether the two datasets agree on *which species are common*. No detectability correction and no units are involved.
+2. **NA-POPS corrections.** How large the corrections are for these species and what drives them.
+3. **CBBC vs BAM point counts.** Whether correction improves agreement in species composition, then the absolute test: the **count ratio** (birds counted / birds expected from CBBC densities and the NA-POPS corrections), checked against the **plot-averaged density ratio**, which weights every CBBC plot equally.
+4. **Synthesis.** What holds across comparisons.
+
+The data are prepared by the three scripts described in Section \@ref(repository-structure-and-workflow), whose cached outputs this report reads.
+
+```{r constants}
+# ---- Cached preparation outputs ----
+# here::here() builds paths from the project root (the folder holding the
+# .Rproj file and this README), so they resolve the same whether the report is
+# knitted or chunks are run interactively. P1-P3 write their outputs to output/.
+OUTPUT_DIR <- here::here("output")
+P1_PATH <- file.path(OUTPUT_DIR, "P1_cbbc_prepared.rds")
+P2_PATH <- file.path(OUTPUT_DIR, "P2_bam_matched.rds")
+P3_PATH <- file.path(OUTPUT_DIR, "P3_napops_corrections.rds")
+
+# ---- Map ----
+BCR_PATH <- "C:/Users/IlesD/OneDrive - EC-EC/Iles/Data/BCR_2026/bcr_2026g.gpkg"   # base map; skipped if absent
+MAP_CRS  <- 3978                   # NAD83 / Canada Atlas Lambert
+MAP_PAD_M <- 2e5                   # map extent padding around the sites (m)
+
+# ---- Summaries ----
+N_BOOT          <- 1000            # bootstrap resamples (sites or species) for CIs
+SEED            <- 1
+MIN_SITE_SPECIES <- 5              # per-site composition correlation: species non-zero in either dataset
+
+# ---- Site-level regression (step 3) ----
+LARGE_PLOT_HA <- 16                # leverage check: refit without plots larger than this (ha)
+
+# ---- CBBC species lists ----
+# FALSE: a species missing from an incomplete census list (fewer species rows
+# than TOTSPP, or TOTSPP not given) is unknown (NA), not absent. TRUE treats it
+# as absent (zero), as a sensitivity check.
+ZERO_FILL_INCOMPLETE_LISTS <- FALSE
+
+# ---- Figures ----
+REF_FOLDS     <- c(2, 5, 10)       # reference lines at x and 1/x
+REF_LINETYPES <- c("dashed", "longdash", "dotted")
+REF_CAPTION   <- "Reference lines: solid = agreement; dashed = 2x; long-dash = 5x; dotted = 10x"
+RATIO_BREAKS  <- sort(c(1 / 100, 1 / REF_FOLDS, 1, REF_FOLDS, 100))
+CLASS_COLOURS <- c(Territorial = "#0072B2", `Non-territorial` = "#E69F00")   # Okabe-Ito blue / orange
+CLASS_SHAPES  <- c(Territorial = 17, `Non-territorial` = 16)
+```
+
+```{r load}
+missing <- c(P1_PATH, P2_PATH, P3_PATH)[!file.exists(c(P1_PATH, P2_PATH, P3_PATH))]
+if (length(missing) > 0) stop("Run the preparation scripts first. Missing: ", paste(missing, collapse = ", "))
+
+p1 <- readRDS(file = P1_PATH); s1 <- attr(x = p1, which = "settings")
+p2 <- readRDS(file = P2_PATH); s2 <- attr(x = p2, which = "settings")
+p3 <- readRDS(file = P3_PATH); s3 <- attr(x = p3, which = "settings")
+
+set.seed(SEED)
+```
+
+```{r helpers}
+# ---- Statistics ----
+
+# 95% percentile CI for a ratio of means (num / den), resampling sites
+boot_ratio_ci <- function(num, den, n_boot = N_BOOT) {
+  idx <- matrix(data = sample.int(n = length(num), size = length(num) * n_boot, replace = TRUE), ncol = n_boot)
+  r   <- colSums(matrix(data = num[idx], ncol = n_boot)) / colSums(matrix(data = den[idx], ncol = n_boot))
+  quantile(x = r[is.finite(r)], probs = c(0.025, 0.975), names = FALSE)
+}
+
+# Species-level ratio of mean densities (num / den) across sites, with a
+# site-bootstrap CI and the Spearman correlation across sites
+ratio_summary <- function(df, num, den, by = c("species", "territorial")) {
+  df |>
+    mutate(.num = {{ num }}, .den = {{ den }}) |>
+    filter(!is.na(.num), !is.na(.den)) |>
+    group_by(across(all_of(by))) |>
+    summarise(n_sites   = n(),
+              n_den_pos = sum(.den > 0),
+              n_num_pos = sum(.num > 0),
+              num_mean  = mean(.num),
+              den_mean  = mean(.den),
+              ratio     = num_mean / den_mean,
+              ci        = list(boot_ratio_ci(num = .num, den = .den)),
+              spearman  = suppressWarnings(cor(x = .num, y = .den, method = "spearman")),
+              .groups   = "drop") |>
+    mutate(ratio_lcl     = map_dbl(.x = ci, .f = 1),
+           ratio_ucl     = map_dbl(.x = ci, .f = 2),
+           ci            = NULL,
+           species_class = if_else(condition = territorial, true = "Territorial", false = "Non-territorial"))
+}
+
+# Typical ratio and share of species within 2x, 5x and 10x
+agreement_summary <- function(df) {
+  df |>
+    filter(is.finite(ratio)) |>   # ratio = 0 counts as outside 10x
+    summarise(n_species    = n(),
+              median_ratio = median(ratio),
+              within_2x    = mean(abs(log(ratio)) <= log(2)),
+              within_5x    = mean(abs(log(ratio)) <= log(5)),
+              within_10x   = mean(abs(log(ratio)) <= log(10)),
+              median_rho   = median(spearman, na.rm = TRUE))
+}
+
+# Correlation across species between two abundance measures: Pearson on log
+# scale (species positive in both) and Spearman (all species)
+cor_summary <- function(x, y) {
+  ok <- x > 0 & y > 0
+  tibble(n_species   = length(x),
+         pearson_log = cor(x = log(x[ok]), y = log(y[ok])),
+         spearman    = cor(x = x, y = y, method = "spearman"))
+}
+
+# Bootstrap (over species) 95% CI for the change in correlation with `y` when
+# measure x1 is replaced by x2
+boot_cor_diff <- function(y, x1, x2, n_boot = N_BOOT) {
+  d <- replicate(n = n_boot, expr = {
+    i  <- sample.int(n = length(y), replace = TRUE)
+    ok <- y[i] > 0 & x1[i] > 0 & x2[i] > 0
+    c(pearson_log = cor(log(x2[i][ok]), log(y[i][ok])) - cor(log(x1[i][ok]), log(y[i][ok])),
+      spearman    = cor(x2[i], y[i], method = "spearman") - cor(x1[i], y[i], method = "spearman"))
+  })
+  tibble(measure = rownames(d),
+         lcl     = apply(X = d, MARGIN = 1, FUN = quantile, probs = 0.025, na.rm = TRUE),
+         ucl     = apply(X = d, MARGIN = 1, FUN = quantile, probs = 0.975, na.rm = TRUE))
+}
+
+# Quantile summary of numeric columns, one row per column
+quantile_table <- function(df, cols) {
+  df |>
+    select(all_of(cols)) |>
+    pivot_longer(cols = everything(), names_to = "variable") |>
+    group_by(variable) |>
+    summarise(min = min(value), q25 = quantile(value, 0.25), median = median(value),
+              q75 = quantile(value, 0.75), max = max(value), .groups = "drop") |>
+    mutate(variable = factor(variable, levels = cols)) |>
+    arrange(variable)
+}
+
+# Ratio estimator of density from a set of surveys: total count / total
+# effective area, using only surveys that have an effective area (NA if none)
+ratio_estimate <- function(count, area) {
+  has_area <- !is.na(area)
+  if (!any(has_area)) return(NA_real_)
+  sum(count[has_area]) / sum(area[has_area])
+}
+
+# ---- Count ratio (birds counted / birds expected) ----
+#
+# See section "How the absolute comparisons work" in the report.
+# If CBBC density D and the NA-POPS corrections are both right, the expected
+# count of survey j near site i is
+#   E[count_ij] = k x area_ij x D_cbbc_i,   with k = 1
+#     area_ij   NA-POPS effective area of the survey (km^2)
+#     D_cbbc_i  CBBC territory density at the site (territories / km^2)
+#     k         observed / expected: birds counted per bird predicted from
+#               CBBC territories and the corrections (1 = agreement)
+#   k = total observed count / total expected count
+# which is the Poisson maximum-likelihood estimate of k (all sites are
+# CBBC-positive, so every survey has an expected count above zero).
+# 95% sampling interval: the wider of
+#   - a site bootstrap (sites resampled with all their surveys, which keeps
+#     repeat visits and nearby points together and absorbs overdispersion), and
+#   - the exact Poisson interval for the total count, divided by the expected
+#     count, which gives a non-zero upper bound when no birds were counted
+#     (where every bootstrap resample would be zero).
+# Both are conditional on the NA-POPS corrections and CBBC densities.
+count_ratio_summary <- function(df, n_boot = N_BOOT) {
+  species_list <- sort(unique(df$species))
+  results <- vector(mode = "list", length = length(species_list))
+
+  for (i in seq_along(species_list)) {
+    d <- df[df$species == species_list[i], ]
+    d$expected <- d$area_km2 * d$cbbc_dens_km2
+
+    # Site bootstrap of observed / expected
+    rows_by_site <- split(x = seq_len(nrow(d)), f = d$SITEID)
+    k_boot <- rep(NA_real_, n_boot)
+    for (b in seq_len(n_boot)) {
+      sampled_sites <- sample(x = names(rows_by_site), size = length(rows_by_site), replace = TRUE)
+      rows <- unlist(rows_by_site[sampled_sites], use.names = FALSE)
+      k_boot[b] <- sum(d$count[rows]) / sum(d$expected[rows])
+    }
+
+    # Exact Poisson 95% interval for the total count, divided by the expected count
+    observed_total <- sum(d$count)
+    expected_total <- sum(d$expected)
+    poisson_lcl <- if (observed_total == 0) 0 else qchisq(p = 0.025, df = 2 * observed_total) / 2 / expected_total
+    poisson_ucl <- qchisq(p = 0.975, df = 2 * (observed_total + 1)) / 2 / expected_total
+
+    # Share of the expected count contributed by the species' largest site:
+    # a large share means one site dominates the count ratio
+    site_expected <- tapply(X = d$expected, INDEX = d$SITEID, FUN = sum)
+
+    results[[i]] <- tibble(
+      species          = species_list[i],
+      territorial      = d$territorial[1],
+      n_sites          = n_distinct(d$SITEID),
+      n_surveys        = nrow(d),
+      observed         = observed_total,
+      expected         = expected_total,
+      k                = observed_total / expected_total,
+      k_lcl            = min(quantile(x = k_boot, probs = 0.025, names = FALSE), poisson_lcl),
+      k_ucl            = max(quantile(x = k_boot, probs = 0.975, names = FALSE), poisson_ucl),
+      max_site_share   = max(site_expected) / sum(d$expected)
+    )
+  }
+
+  bind_rows(results) |>
+    mutate(species_class = if_else(condition = territorial, true = "Territorial", false = "Non-territorial"))
+}
+
+# Summary of count ratios across species: median, median fold difference in
+# either direction, share within 2x / 5x of agreement, and the number of
+# species with no birds counted (k = 0, which counts as outside 5x)
+count_ratio_agreement <- function(df) {
+  df |>
+    filter(is.finite(k)) |>
+    summarise(n_species       = n(),
+              median_k        = median(k),
+              median_abs_fold = exp(median(abs(log(k)))),
+              within_2x       = mean(abs(log(k)) <= log(2)),
+              within_5x       = mean(abs(log(k)) <= log(5)),
+              n_no_birds      = sum(k == 0))
+}
+
+# ---- Leverage check for the plot-size term ----
+
+# log(plot size) coefficient of a site-level regression, fitted to all sites and
+# refitted without plots larger than LARGE_PLOT_HA
+plot_size_leverage <- function(fit, data) {
+  fit_small <- update(object = fit, data = filter(data, plot_ha <= LARGE_PLOT_HA))
+  plot_row  <- "log(plot_ha)"
+  tibble(sites   = c("All sites", sprintf("Plots <= %g ha", LARGE_PLOT_HA)),
+         n_sites = c(nobs(fit), nobs(fit_small)),
+         estimate  = c(coef(summary(fit))[plot_row, "Estimate"],   coef(summary(fit_small))[plot_row, "Estimate"]),
+         std_error = c(coef(summary(fit))[plot_row, "Std. Error"], coef(summary(fit_small))[plot_row, "Std. Error"]),
+         p_value   = c(coef(summary(fit))[plot_row, "Pr(>|t|)"],   coef(summary(fit_small))[plot_row, "Pr(>|t|)"]))
+}
+
+# ---- CBBC site densities ----
+
+# Census records whose species list is complete: at least as many species rows
+# as TOTSPP says the list should contain. Only these are zero-filled below.
+complete_list_records <- p1$cbbc_qa |>
+  filter(keep, !is.na(TOTSPP), n_species_rows >= TOTSPP) |>
+  pull(RECNO)
+
+# Site densities (territories / km^2) for species `spp` at `sites`, then the
+# mean over the site's census years:
+#   - a species missing from a complete census list is a zero (absent);
+#   - a species missing from an incomplete list (or one without TOTSPP) is
+#     unknown (NA), unless ZERO_FILL_INCOMPLETE_LISTS is TRUE;
+#   - a species listed without a usable density stays NA (explicit = FALSE);
+#   - ALFL / WIFL are unknown in Traill's Flycatcher records.
+# The mean over census years uses only the years where the species is known.
+cbbc_site_density <- function(spp, sites) {
+  p1$cbbc_long |>
+    filter(SITEID %in% sites) |>
+    select(RECNO, SITEID, YEAR, species, dens_km2) |>
+    mutate(listed = TRUE) |>
+    complete(nesting(RECNO, SITEID, YEAR), species = spp, fill = list(dens_km2 = 0), explicit = FALSE) |>
+    filter(species %in% spp) |>
+    mutate(dens_km2 = if_else(condition = is.na(listed) & !RECNO %in% complete_list_records & !ZERO_FILL_INCOMPLETE_LISTS,
+                              true = NA_real_, false = dens_km2),
+           dens_km2 = if_else(condition = RECNO %in% p1$traill_records & species %in% s1$traill_species,
+                              true = NA_real_, false = dens_km2)) |>
+    group_by(SITEID, species) |>
+    summarise(n_census       = sum(!is.na(dens_km2)),
+              cbbc_dens_km2  = mean(dens_km2, na.rm = TRUE),
+              cbbc_year_mean = mean(YEAR),
+              .groups        = "drop") |>
+    filter(!is.nan(cbbc_dens_km2))
+}
+
+# ---- Figures ----
+
+ref_vlines <- function() {
+  c(list(geom_vline(xintercept = 1, colour = "grey30")),
+    map2(.x = REF_FOLDS, .y = REF_LINETYPES,
+         .f = ~ geom_vline(xintercept = c(1 / .x, .x), linetype = .y, colour = "grey55")))
+}
+ref_ablines <- function() {
+  c(list(geom_abline(intercept = 0, slope = 1, colour = "grey30")),
+    map2(.x = REF_FOLDS, .y = REF_LINETYPES,
+         .f = ~ geom_abline(intercept = log10(c(1 / .x, .x)), slope = 1, linetype = .y, colour = "grey55")))
+}
+fold_labels <- function(x) if_else(condition = x < 1, true = paste0("1/", round(1 / x)), false = as.character(x))
+
+# Species ratios with 95% CIs, sorted, against the reference lines
+plot_ratio <- function(summary, xlab) {
+  summary |>
+    filter(is.finite(ratio), ratio > 0) |>
+    mutate(species = fct_reorder(.f = species, .x = ratio)) |>
+    ggplot(mapping = aes(x = ratio, y = species, colour = species_class, shape = species_class)) +
+    ref_vlines() +
+    geom_linerange(mapping = aes(xmin = pmax(ratio_lcl, min(RATIO_BREAKS)), xmax = ratio_ucl)) +
+    geom_point(size = 1.5) +
+    scale_x_log10(breaks = RATIO_BREAKS, labels = fold_labels) +
+    scale_colour_manual(values = CLASS_COLOURS) +
+    scale_shape_manual(values = CLASS_SHAPES) +
+    labs(x = xlab, y = NULL, colour = NULL, shape = NULL, caption = REF_CAPTION) +
+    theme_bw() +
+    theme(legend.position = "top")
+}
+
+# Log-log scatter of two species-level measures with labels and reference lines
+plot_pair <- function(df, x, y, xlab, ylab, ref = TRUE) {
+  df |>
+    filter(.data[[x]] > 0, .data[[y]] > 0) |>
+    ggplot(mapping = aes(x = .data[[x]], y = .data[[y]], colour = species_class, shape = species_class)) +
+    (if (ref) ref_ablines() else NULL) +
+    geom_point() +
+    geom_text(mapping = aes(label = species), size = 2.2, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE) +
+    scale_x_log10() +
+    scale_y_log10() +
+    scale_colour_manual(values = CLASS_COLOURS) +
+    scale_shape_manual(values = CLASS_SHAPES) +
+    labs(x = xlab, y = ylab, colour = NULL, shape = NULL, caption = if (ref) REF_CAPTION else NULL) +
+    theme_bw() +
+    theme(legend.position = "top")
+}
+
+fig_height <- function(n) 1.5 + 0.14 * n   # height for one-row-per-species figures
+
+pct <- function(x) paste0(round(100 * x), "%")
+```
+
+```{r build-tables}
+# ---- Sites ----
+matched_sites <- unique(p2$site_survey$SITEID)
+
+sites_info <- p1$cbbc_sites |>
+  mutate(matched = SITEID %in% matched_sites)
+
+# ---- Candidate species ----
+# All species with CBBC territories at enough matched sites and an NA-POPS
+# model, whether or not BAM detected them (P3). Narrowed to those with NA-POPS models
+# below, once the quantities used to select it have been computed.
+cands          <- p3$species_candidates
+spp_candidates <- cands |> filter(in_napops) |> pull(species)
+
+# ---- Survey assignment (every comparison) ----
+# Each retained survey is assigned to its nearest CBBC plot, so a survey within
+# 1 km of two plots is used once, never twice, and every comparison uses the
+# same surveys at each plot. site_year identifies repeat surveys of one point
+# location in one season.
+survey_nearest <- p2$site_survey |>
+  group_by(survey_id) |>
+  slice_min(order_by = dist_m, n = 1, with_ties = FALSE) |>
+  ungroup()
+
+survey_grid <- survey_nearest |>
+  transmute(SITEID, survey_id, year, site_year = paste(location_id, year, sep = "_"))
+
+n_surveys_multi_site <- p2$site_survey |> count(survey_id) |> filter(n > 1) |> nrow()
+n_sites_assigned     <- n_distinct(survey_grid$SITEID)
+
+# ---- Matched site x species table (steps 1 and 3) ----
+# BAM: count per survey (uncorrected) and NA-POPS-corrected density (ratio
+# estimator over the surveys assigned to the site).
+# Restricted to CBBC-positive grids: site x species combinations where spot
+# mapping found territories of the species (see "Sites compared" above).
+site_bam <- survey_grid |>
+  select(SITEID, survey_id, year) |>
+  inner_join(y = select(p3$survey_species, survey_id, species, count, area_km2),
+             by = "survey_id") |>
+  group_by(SITEID, species) |>
+  summarise(n_surveys     = n(),
+            sum_count     = sum(count),
+            bam_dens_km2  = ratio_estimate(count = count, area = area_km2),
+            bam_year_mean = mean(year),
+            .groups       = "drop") |>
+  mutate(count_per_survey = sum_count / n_surveys)
+
+# All matched site x species combinations, including CBBC zeros: used only for
+# the composition comparison of section "Do the datasets agree on which species
+# are common?", where every species must be measured over the same sites
+site_matched_all <- site_bam |>
+  inner_join(y = cbbc_site_density(spp = spp_candidates, sites = matched_sites), by = c("SITEID", "species")) |>
+  filter(!is.na(cbbc_dens_km2)) |>
+  mutate(territorial = !species %in% s1$exclude_species)
+
+site_matched <- site_matched_all |>
+  filter(cbbc_dens_km2 > 0) |>
+  left_join(y = select(sites_info, SITEID, plot_ha, visits_mean), by = "SITEID") |>
+  mutate(year_gap = bam_year_mean - cbbc_year_mean)
+
+# ---- Survey-level table (step 3) ----
+# One row per retained survey x NA-POPS species, at the species' CBBC-positive
+# grids (same survey assignment as above).
+survey_data <- survey_grid |>
+  inner_join(y = select(p3$survey_species, survey_id, species, count, area_km2), by = "survey_id") |>
+  filter(species %in% spp_candidates, !is.na(area_km2)) |>
+  inner_join(y = select(site_matched, SITEID, species, cbbc_dens_km2, cbbc_year_mean, territorial),
+             by = c("SITEID", "species"))
+
+# ---- Species compared ----
+# Every candidate from P3 (CBBC territories at >= the P3 minimum number of
+# matched sites) that has NA-POPS removal and distance models. No other
+# criterion is applied. Availability, EDR and the BAM count expected under
+# agreement are computed for reference only.
+
+# Availability standardized to a 5-min count (same cue rate, survey's own p
+# rescaled from its duration)
+availability_5min <- p3$survey_species |>
+  filter(species %in% spp_candidates, !is.na(p)) |>
+  mutate(p_5min = 1 - (1 - p)^(5 / (duration / 60))) |>
+  group_by(species) |>
+  summarise(p_5min_median = median(p_5min), .groups = "drop")
+
+# BAM count expected if NA-POPS-corrected densities equalled CBBC densities
+# (see section "Species compared")
+expected_counts <- survey_data |>
+  group_by(species) |>
+  summarise(expected_count = sum(area_km2 * cbbc_dens_km2),
+            observed_count = sum(count),
+            .groups        = "drop")
+
+species_selection <- cands |>
+  select(species, common_name, family, n_sites_cbbc, in_napops, territorial, detected_nearby) |>
+  left_join(y = availability_5min, by = "species") |>
+  left_join(y = select(p3$species_corrections, species, edr_m), by = "species") |>
+  left_join(y = expected_counts, by = "species") |>
+  mutate(primary = in_napops)
+
+spp_primary <- species_selection |> filter(primary) |> pull(species)
+
+# ---- Restrict every comparison to the species compared ----
+spp_napops   <- spp_primary                                  # steps 2 and 3
+site_matched     <- filter(site_matched, species %in% spp_primary)
+site_matched_all <- filter(site_matched_all, species %in% spp_primary)
+survey_data      <- filter(survey_data, species %in% spp_primary)
+```
+
+# Step 1: Data support and raw agreement
+
+**Question:** how much matched data is there, how well replicated, from when and where, and do CBBC and raw BAM counts agree on which species are common?
+
+**Why this comes first:** every later comparison inherits the sample sizes, the time gap and the geographic coverage described here. Weak support or a long gap limits what any detectability comparison can show.
+
+## Sample sizes
+
+**What this tests:** how many CBBC census records survive the quality filters, and how many of the retained sites have BAM point counts close enough to compare. Each filter is listed separately, so it is clear why records were dropped and which filter costs the most data.
+
+```{r step1a}
+cbbc_filters <- p1$cbbc_qa |>
+  summarise(across(.cols = starts_with("keep_"), .fns = ~ sum(!.x, na.rm = TRUE))) |>
+  pivot_longer(cols = everything(), names_to = "filter", values_to = "records_failing") |>
+  mutate(filter = recode(filter,
+                         keep_coords  = "Usable coordinates",
+                         keep_gridref = sprintf("Coordinates agree with GRIDREF (<= %g km)", s1$coord_max_disagree_m / 1000),
+                         keep_list    = sprintf("Species list >= %g%% of TOTSPP", 100 * s1$list_completeness_min),
+                         keep_visits  = sprintf("Visits reported and >= %g", s1$min_visits),
+                         keep_size    = sprintf("Plot size reported and %g-%g ha", s1$min_plot_ha, s1$max_plot_ha),
+                         keep_year    = "Census year",
+                         keep_habitat = "Not successional or urban habitat"))
+
+n_records     <- nrow(p1$cbbc_qa)
+n_records_ret <- sum(p1$cbbc_qa$keep)
+n_sites_ret   <- nrow(p1$cbbc_sites)
+n_matched     <- length(matched_sites)
+
+kable(cbbc_filters, col.names = c("CBBC filter", "Records failing"),
+      caption = sprintf("CBBC census records failing each filter (of %d; a record can fail several)", n_records), label = "step1a-1")
+
+kable(p2$survey_funnel, col.names = c("BAM survey filter (cumulative)", "CBBC sites", "Surveys"),
+      caption = sprintf("CBBC sites with BAM surveys within %g km, and surveys, after each filter", s2$match_radius_m / 1000), label = "step1a-2")
+
+radius_coverage <- tibble(radius_m = c(250, 500, 1000)) |>
+  mutate(n_sites = map_int(.x = radius_m, .f = ~ n_distinct(p2$site_survey$SITEID[p2$site_survey$dist_m <= .x])))
+kable(radius_coverage, col.names = c("Within (m)", "CBBC sites with >= 1 retained survey"),
+      caption = "CBBC sites with at least one retained BAM survey within each distance of the plot coordinate", label = "step1a-3")
+
+# Completeness of the species lists of retained census records
+p1$cbbc_qa |>
+  filter(keep) |>
+  mutate(list_status = case_when(is.na(TOTSPP)            ~ "TOTSPP not given",
+                                 n_species_rows >= TOTSPP ~ "Complete (species rows >= TOTSPP)",
+                                 .default                 = sprintf("Incomplete (>= %g%% of TOTSPP)", 100 * s1$list_completeness_min))) |>
+  count(list_status, name = "records") |>
+  kable(col.names = c("Species list", "Retained census records"),
+        caption = sprintf("Completeness of the species lists of retained census records. A species missing from a complete list is treated as absent; one missing from any other list is treated as unknown%s", if (ZERO_FILL_INCOMPLETE_LISTS) " (here: absent, sensitivity setting)" else ""),
+        label = "step1a-4")
+```
+
+`r n_records_ret` of `r n_records` census records (`r n_sites_ret` sites) pass the CBBC filters, and **`r n_matched` sites** have at least one retained BAM point count within `r s2$match_radius_m / 1000` km. `r n_surveys_multi_site` retained surveys lie within `r s2$match_radius_m / 1000` km of more than one plot; each survey is assigned to its nearest plot, so no survey is used twice, and `r n_sites_assigned` sites keep at least one assigned survey. That is the maximum sample for site-level comparisons. Species-level comparisons pool across these sites.
+
+## Replication of BAM surveys
+
+**What this tests:** how much BAM effort stands behind each site's density estimate. A site with one survey, or many surveys from a single point, has a noisy estimate. This is why the absolute comparisons below pool sites within each species rather than comparing sites one by one.
+
+```{r step1b, fig.cap = "Retained BAM surveys per matched CBBC site (log scale)."}
+replication <- survey_nearest |>
+  group_by(SITEID) |>
+  summarise(surveys   = n_distinct(survey_id),
+            locations = n_distinct(round(x = longitude, digits = 5), round(x = latitude, digits = 5)),
+            projects  = n_distinct(project_id),
+            years     = n_distinct(year),
+            .groups   = "drop")
+
+kable(quantile_table(df = replication, cols = c("surveys", "locations", "projects", "years")), digits = 1,
+      caption = "Per matched site: retained BAM surveys assigned to the site (nearest plot), distinct point locations, projects and survey years", label = "step1b-1")
+
+ggplot(data = replication, mapping = aes(x = surveys)) +
+  geom_histogram(bins = 30, fill = CLASS_COLOURS[["Territorial"]]) +
+  scale_x_log10() +
+  labs(x = "Retained BAM surveys per site (log scale)", y = "Sites") +
+  theme_bw()
+
+share_one_location <- mean(replication$locations == 1)
+```
+
+The median site has `r median(replication$surveys)` surveys from `r median(replication$locations)` point location(s), and `r pct(share_one_location)` of sites have surveys from a single location. **How to read:** each site's BAM estimate rests on few surveys, so site-level comparisons are noisy. Species-level ratios pooled across sites are the more robust measure. Repeat visits to one location replicate *time*, not *space*.
+
+## CBBC plot sizes
+
+**What this shows:** how large the spot-mapping plots are, compared with the area of the 1 km circle within which BAM surveys are matched. The larger the matching circle relative to the plot, the more the nearby points can sample habitat that is not on the plot.
+
+```{r step1-plots}
+# Plot size per site is the median across the site's retained census years (P1)
+plot_sizes <- bind_rows(`All retained sites` = sites_info,
+                        `Matched sites`      = filter(sites_info, matched),
+                        .id = "site_set") |>
+  group_by(site_set) |>
+  summarise(n_sites         = n(),
+            min             = min(plot_ha),
+            q25             = quantile(plot_ha, 0.25),
+            median          = median(plot_ha),
+            q75             = quantile(plot_ha, 0.75),
+            max             = max(plot_ha),
+            median_radius_m = median(plot_radius_m),
+            .groups         = "drop")
+
+kable(plot_sizes, digits = 1,
+      col.names = c("Sites", "Number of sites", "Min", "25%", "Median", "75%", "Max", "Median equivalent radius (m)"),
+      caption = "CBBC plot size (ha) at all retained sites and at matched sites, and the radius of a circle with the median plot's area",
+      label = "step1-plots-1")
+
+match_circle_ha <- pi * (s2$match_radius_m / 100)^2   # area of the matching circle (ha)
+median_plot_matched <- plot_sizes$median[plot_sizes$site_set == "Matched sites"]
+```
+
+The median matched plot is `r round(median_plot_matched)` ha. The `r s2$match_radius_m / 1000` km matching circle covers `r round(match_circle_ha)` ha, about `r round(match_circle_ha / median_plot_matched)` times as much, so most of the area sampled by the matched points lies off the plot.
+
+## Timing
+
+**What this tests:** how far apart in time the two datasets are. Populations change, so a long gap means CBBC densities may not describe the community the BAM surveys sampled. The gap cannot be removed with these data. It is the main reason disagreement for an individual species should not be read as detectability error.
+
+```{r step1c, fig.cap = "Years of BAM point counts and CBBC censuses at matched sites."}
+years <- bind_rows(
+  p1$cbbc_qa |> filter(keep, SITEID %in% matched_sites) |> transmute(dataset = "CBBC censuses", year = YEAR),
+  p2$site_survey |> distinct(survey_id, year) |> transmute(dataset = "BAM point counts", year = year)
+)
+
+years |>
+  group_by(dataset) |>
+  summarise(n = n(), min = min(year), q25 = quantile(year, 0.25), median = median(year),
+            q75 = quantile(year, 0.75), max = max(year)) |>
+  kable(digits = 0, caption = "Years of CBBC censuses and BAM surveys at matched sites", label = "step1c-1")
+
+ggplot(data = years, mapping = aes(x = year)) +
+  geom_histogram(binwidth = 2, fill = CLASS_COLOURS[["Territorial"]]) +
+  facet_wrap(facets = vars(dataset), ncol = 1, scales = "free_y") +
+  labs(x = "Year", y = "Count") +
+  theme_bw()
+
+year_gap <- survey_nearest |>
+  group_by(SITEID) |>
+  summarise(bam_year = mean(year), .groups = "drop") |>
+  inner_join(y = select(p1$cbbc_sites, SITEID, year_mean), by = "SITEID") |>
+  mutate(gap = bam_year - year_mean)
+```
+
+The median gap between a site's CBBC census year(s) and its BAM surveys is **`r round(median(year_gap$gap))` years** (IQR `r round(quantile(year_gap$gap, 0.25))`-`r round(quantile(year_gap$gap, 0.75))`). **How to read:** population change over that gap is mixed in with every density comparison below, and declines would make BAM look *lower* than CBBC. It cannot be separated from detectability error with these data alone.
+
+## Geographic representation
+
+**What this tests:** where the matched sites are, which limits how far the conclusions generalize.
+
+```{r step1d, fig.cap = sprintf("Retained CBBC sites, by whether they have retained BAM point counts within %g km.", s2$match_radius_m / 1000), fig.height = 6}
+sites_sf <- sites_info |>
+  mutate(status = if_else(condition = matched, true = "Matched (BAM surveys within 1 km)", false = "Not matched")) |>
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
+  st_transform(crs = MAP_CRS)
+
+map_box <- st_bbox(st_buffer(x = st_as_sfc(st_bbox(sites_sf)), dist = MAP_PAD_M))
+
+bcr <- if (file.exists(BCR_PATH)) {
+  tryCatch(expr = st_read(dsn = BCR_PATH, quiet = TRUE) |>
+             st_transform(crs = MAP_CRS) |>
+             st_make_valid() |>
+             st_crop(y = map_box) |>
+             st_simplify(dTolerance = 2000),
+           error = function(e) NULL)
+} else NULL
+
+ggplot() +
+  (if (!is.null(bcr)) geom_sf(data = bcr, fill = "grey96", colour = "grey70", linewidth = 0.2) else NULL) +
+  geom_sf(data = sites_sf, mapping = aes(shape = status, colour = status), size = 1.6) +
+  scale_shape_manual(values = c(16, 1)) +
+  scale_colour_manual(values = c(CLASS_COLOURS[["Territorial"]], "grey35")) +
+  coord_sf(xlim = map_box[c("xmin", "xmax")], ylim = map_box[c("ymin", "ymax")], crs = MAP_CRS) +
+  labs(shape = NULL, colour = NULL, caption = if (!is.null(bcr)) "Grey outlines: Bird Conservation Regions" else NULL) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**How to read:** results describe the regions of the *matched* sites (concentrated in southern Ontario), not Canada as a whole.
+
+## Species compared {#species-compared}
+
+**What this shows.** Which species enter the comparison. Candidates are all species with CBBC territories at `r s3$min_sites_cbbc` or more matched sites; those with NA-POPS models are compared. No criterion uses the observed BAM counts, availability or EDR. Table \@ref(tab:step1-species-2) shows each species' class (territorial or not), its 5-min availability and EDR, and the BAM count expected if NA-POPS-corrected densities equalled CBBC densities, alongside the count observed.
+
+**How the expected count is calculated.** It is the total number of birds the BAM surveys should have counted if two things were both true: the CBBC territory densities still described the places those surveys sampled, and the NA-POPS corrections were right. For each species:
+
+1. **Surveys used.** Every retained BAM survey is assigned to its nearest CBBC grid. The surveys used are those assigned to the species' CBBC-positive grids (grids where spot mapping found territories of the species).
+2. **Expected count of one survey.** For survey *j* at grid *g*: expected~*j*~ = *A*~*j*~ × *D*~*g*~, where
+   - *D*~*g*~ is the CBBC territory density at grid *g* (territories / km², mean over the grid's census years);
+   - *A*~*j*~ is the survey's NA-POPS effective area (km²): *A*~*j*~ = *p*~*j*~ × π × EDR² × (1 − exp(−(*r*~*j*~ / EDR)²)) / 10^6^;
+   - *p*~*j*~ is availability, the probability that a bird present sings or calls during the count. It comes from the NA-POPS removal model and depends on the survey's duration, day of year and time since sunrise;
+   - EDR is the species' effective detection radius (m), from the NA-POPS intercept-only distance model;
+   - *r*~*j*~ is the survey's distance limit (m). For an unlimited-distance count the last factor is 1, so *A*~*j*~ = *p*~*j*~ × π × EDR² / 10^6^.
+3. **Totals.** The table shows the sum of expected~*j*~ over the species' surveys, next to the sum of the counts observed in the same surveys.
+
+For example, a 5-min survey with *p* = 0.8, EDR = 100 m and a 100 m distance limit has *A* = 0.8 × π × 0.1² × (1 − e^−1^) ≈ 0.016 km². At a grid with 20 territories / km² it is expected to count about 0.32 birds.
+
+The calculation counts one bird per territory. Pairs, fledglings and non-territorial birds push the observed count above it; population declines since the census, and points sampling different habitat from the plot, push it below. Observed / expected is the count ratio of Section \@ref(observed-expected), where it is explained in detail and given with confidence intervals.
+
+```{r step1-species}
+species_selection |>
+  filter(primary) |>
+  arrange(desc(expected_count)) |>
+  transmute(species, common_name,
+            Class = if_else(condition = territorial, true = "Territorial", false = "Non-territorial"),
+            `CBBC sites` = n_sites_cbbc,
+            `Expected count` = round(expected_count), `Observed count` = observed_count,
+            `5-min availability` = round(p_5min_median, 2), `EDR (m)` = round(edr_m)) |>
+  kable(caption = "Species compared: BAM count expected if NA-POPS-corrected densities equalled CBBC densities (CBBC-positive grids), count observed in the same surveys, 5-min availability and EDR", label = "step1-species-2")
+```
+
+`r length(spp_primary)` of `r nrow(species_selection)` candidate species have NA-POPS models and are compared (`r sum(species_selection$primary & species_selection$territorial)` territorial, `r sum(species_selection$primary & !species_selection$territorial)` non-territorial). `r sum(species_selection$primary & !species_selection$detected_nearby)` of them were never detected by a matched BAM survey.
+
+## Do the datasets agree on which species are common?
+
+**What this tests:** whether, before any correction, the two methods rank species similarly. This is the most robust comparison in the report: it needs no detectability correction and no units, so errors in NA-POPS cannot affect it. Strong agreement means the datasets describe broadly the same communities, so later absolute differences are more likely to reflect detectability. Weak agreement means time, habitat and method differences are large, and the absolute comparisons need more caution.
+
+Relative abundance is computed site by site, then averaged across sites:
+
+1. **Within each matched site**, each species' share of the site's community: its CBBC territory density divided by the summed density of all species compared at that site, and likewise its BAM **uncorrected** count per survey divided by the site's summed count per survey. A species absent from a site has a share of 0 there.
+2. **Across sites**, each species' shares are averaged. Only sites where both datasets recorded at least one of the species compared are used, so both averages come from the same sites.
+
+A species whose presence at a site is unknown (missing from an incomplete census list; Table \@ref(tab:step1a-4)) is left out of that site's shares in both datasets, so unknowns are not counted as absences. Each site contributes equally, whatever its plot size or density, and a few plots with exceptionally high densities of one species (for example Bay-breasted Warbler on budworm-outbreak plots) cannot dominate the result. Averaging summed densities instead would let those plots set the species' share. No detectability correction or units are involved.
+
+This is the one comparison in the report not restricted to CBBC-positive grids. Composition needs every species measured over the same sites; at CBBC-positive grids each species' share would describe only the plots where it was found.
+
+```{r step1e, fig.cap = "Mean within-site share of CBBC territories vs mean within-site share of BAM individuals counted (uncorrected), by species, across all matched sites. Line: equal shares."}
+# Step 1: each species' share of each site's community, in each dataset.
+# Sites where either dataset recorded none of the species compared are dropped,
+# so both datasets' shares are averaged over the same sites.
+site_shares <- site_matched_all |>
+  group_by(SITEID) |>
+  filter(sum(cbbc_dens_km2) > 0, sum(count_per_survey) > 0) |>
+  mutate(cbbc_site_share = cbbc_dens_km2 / sum(cbbc_dens_km2),
+         bam_site_share  = count_per_survey / sum(count_per_survey)) |>
+  ungroup()
+
+# Step 2: average each species' shares across sites (0 where it was absent)
+rel_abund <- site_shares |>
+  group_by(species, territorial) |>
+  summarise(cbbc_share = mean(cbbc_site_share),
+            bam_share  = mean(bam_site_share),
+            .groups    = "drop") |>
+  mutate(species_class = if_else(condition = territorial, true = "Territorial", false = "Non-territorial"))
+
+n_share_sites <- n_distinct(site_shares$SITEID)
+
+cor_1e <- bind_rows(`All species` = cor_summary(x = rel_abund$cbbc_share, y = rel_abund$bam_share),
+                    `Territorial` = with(filter(rel_abund, territorial), cor_summary(x = cbbc_share, y = bam_share)),
+                    .id = "species")
+kable(cor_1e, digits = 2, caption = "Correlation across species of CBBC and uncorrected BAM relative abundance (mean within-site shares, all matched sites)", label = "step1e-1")
+
+plot_pair(df = rel_abund, x = "cbbc_share", y = "bam_share", ref = FALSE,
+          xlab = "CBBC share of territories (mean within-site share)",
+          ylab = "BAM share of individuals counted, uncorrected (mean within-site share)") +
+  geom_abline(intercept = 0, slope = 1, colour = "grey30")
+
+# Per site: rank correlation across species of CBBC density and BAM count per survey
+site_composition <- site_matched_all |>
+  group_by(SITEID) |>
+  filter(sum(cbbc_dens_km2 > 0 | count_per_survey > 0) >= MIN_SITE_SPECIES) |>
+  summarise(rho = suppressWarnings(cor(x = cbbc_dens_km2, y = count_per_survey, method = "spearman")),
+            .groups = "drop")
+```
+
+Shares are averaged over `r n_share_sites` matched sites. Across species, CBBC and uncorrected BAM relative abundances have Spearman ρ = **`r round(cor_1e$spearman[1], 2)`** (Pearson on log scale `r round(cor_1e$pearson_log[1], 2)`). Within individual sites, the median rank correlation across species is `r round(median(site_composition$rho, na.rm = TRUE), 2)` (`r nrow(site_composition)` sites). **How to read:** a strong species-level correlation means the datasets broadly agree on community composition before any correction. Species far off the 1:1 line in Figure \@ref(fig:step1e) are the candidates for detectability or methodological differences: loud, far-detected species should sit *above* it (over-represented in counts), and quiet or short-range species *below*.
+
+# Step 2: NA-POPS detectability corrections {#napops-corrections}
+
+**Question:** how large are the NA-POPS corrections for these species and surveys, and what drives them?
+
+**What this tests:** this step does not compare with CBBC. It sets expectations for step 3: a correction can only change agreement with CBBC as much as it varies between species, and the absolute comparisons are only as reliable as the least certain part of the correction.
+
+Each survey's effective area is p × π × EDR² × (1 − exp(−(r/EDR)²)). Availability p comes from the best NA-POPS removal model (duration, day of year, time since sunrise). EDR comes from the NA-POPS intercept-only distance model: one EDR per species, averaged over the habitats and road types in the NA-POPS training data. Habitat-specific EDRs, using forest cover around each survey, changed densities by a median of about 3%, so they are not used. Each species' availability and EDR are shown in Table \@ref(tab:step1-species-2).
+
+NA-POPS results release: **`r s3$napops_data_date`**.
+
+```{r step2-stats}
+corr_tbl <- p3$species_corrections |>
+  filter(species %in% spp_napops) |>
+  mutate(density_ci_factor = (edr_ucl / edr_lcl)^2)   # width of the density interval from EDR sampling error alone
+
+napops_surveys <- p3$survey_species |> filter(species %in% spp_napops, !is.na(area_km2))
+
+r2_species <- summary(lm(formula = log(area_km2) ~ species, data = napops_surveys))$r.squared
+area_range <- range(corr_tbl$area_median_km2)
+var_edr    <- var(log(pi * corr_tbl$edr_m^2))
+var_p      <- var(log(corr_tbl$p_median))
+
+# How much the correction re-ranks species: uncorrected vs corrected mean
+# abundance across species at CBBC-positive grids
+rerank <- site_matched |>
+  filter(species %in% spp_napops, !is.na(bam_dens_km2)) |>
+  group_by(species) |>
+  summarise(count = mean(count_per_survey), dens = mean(bam_dens_km2), .groups = "drop")
+rho_rerank <- cor(x = rerank$count, y = rerank$dens, method = "spearman")
+
+tibble(
+  feature = c("Spread of median effective area across species (max / min)",
+              "Share of variance in log effective area due to species identity",
+              "Share of between-species variance in log(p x EDR^2) from EDR",
+              "Spearman rank correlation, uncorrected vs corrected species abundance",
+              "Median width of density 95% interval from EDR sampling error alone (factor; excludes model, release and availability uncertainty)",
+              "Median share of surveys outside NA-POPS training range"),
+  value = c(sprintf("%.1f", area_range[2] / area_range[1]),
+            pct(r2_species),
+            pct(var_edr / (var_edr + var_p)),
+            sprintf("%.2f", rho_rerank),
+            sprintf("%.2f", median(corr_tbl$density_ci_factor, na.rm = TRUE)),
+            pct(median(pmax(corr_tbl$share_od_out, corr_tbl$share_tssr_out))))
+) |>
+  kable(col.names = c("Key feature of the corrections", "Value"),
+        caption = "Key features of the NA-POPS corrections for the species compared", label = "step2-stats-1")
+```
+
+**How to read:**
+
+- **Spread across species.** The corrections differ about `r round(area_range[2] / area_range[1])`-fold between species, so they can substantially re-order species. A rank correlation of `r round(rho_rerank, 2)` between uncorrected and corrected abundance shows how much they actually do.
+- **Within vs between species.** Species identity explains `r pct(r2_species)` of the variation in effective area. With one EDR per species, the variation within a species comes only from availability (survey duration, date and time) and the distance limit. The corrections therefore act mostly *between* species (composition and absolute level), and barely change how sites rank *within* a species.
+- **EDR dominates.** EDR enters squared, and accounts for `r pct(var_edr / (var_edr + var_p))` of the between-species variation, so errors in EDR matter most.
+- **Precision.** EDR *sampling* error alone gives each species' density a 95% interval spanning a factor of only about `r round(median(corr_tbl$density_ci_factor, na.rm = TRUE), 2)`. That greatly understates the real uncertainty, which also includes the choice of distance model, availability, and the NA-POPS release (which has shifted closed-forest EDRs by up to ~25% between releases). For an unlimited-distance count, density scales with 1 / EDR², so a 25% larger EDR lowers density by 1 − 1/1.25² ≈ 36%, and every comparison with CBBC would shift by about that factor.
+
+# Step 3: CBBC vs BAM point counts
+
+**Question:** do BAM point counts agree with CBBC, first in composition (with and without correction) and then in absolute density after correction? Where do they disagree?
+
+**Structure:** composition first (does correction move the species mix toward CBBC?), then an explanation of how the absolute comparisons work, then the two absolute comparisons themselves: the count ratio (main result) and the plot-averaged density ratio (check on how plots are weighted). Population change, a detection-rate check and the site characteristics associated with disagreement follow.
+
+## Composition: does correction improve agreement with CBBC?
+
+**What this tests:** whether applying the NA-POPS corrections makes the BAM species composition more like CBBC's. This tests the corrections' *relative* values between species (for example, that a quiet species needs a larger correction than a loud one), independent of their absolute level. If the corrections were noise, agreement would not improve.
+
+```{r step3a, fig.cap = "CBBC density vs uncorrected (left) and NA-POPS-corrected (right) BAM point counts, species means at CBBC-positive grids."}
+four <- site_matched |> filter(species %in% spp_napops, !is.na(bam_dens_km2))
+
+means_4 <- four |>
+  group_by(species, territorial) |>
+  summarise(cbbc = mean(cbbc_dens_km2), uncorrected = mean(count_per_survey),
+            corrected = mean(bam_dens_km2), .groups = "drop") |>
+  mutate(species_class = if_else(condition = territorial, true = "Territorial", false = "Non-territorial"))
+
+cor_4a <- bind_rows(
+  `Uncorrected, all`         = cor_summary(x = means_4$cbbc, y = means_4$uncorrected),
+  `Corrected, all`           = cor_summary(x = means_4$cbbc, y = means_4$corrected),
+  `Uncorrected, territorial` = with(filter(means_4, territorial), cor_summary(x = cbbc, y = uncorrected)),
+  `Corrected, territorial`   = with(filter(means_4, territorial), cor_summary(x = cbbc, y = corrected)),
+  .id = "BAM point counts"
+)
+kable(cor_4a, digits = 2, caption = "Correlation across species of CBBC density with BAM point counts", label = "step3a-1")
+
+kable(with(filter(means_4, territorial), boot_cor_diff(y = cbbc, x1 = uncorrected, x2 = corrected)), digits = 2,
+      caption = "Territorial species: 95% bootstrap CI for the change in correlation with CBBC, corrected minus uncorrected", label = "step3a-2")
+
+means_4 |>
+  pivot_longer(cols = c(uncorrected, corrected), names_to = "version", values_to = "bam") |>
+  mutate(version = factor(recode(version, uncorrected = "Uncorrected (count per survey)",
+                                 corrected = "NA-POPS corrected (birds / km²)"),
+                          levels = c("Uncorrected (count per survey)", "NA-POPS corrected (birds / km²)"))) |>
+  filter(bam > 0, cbbc > 0) |>
+  ggplot(mapping = aes(x = cbbc, y = bam, colour = species_class, shape = species_class)) +
+  geom_point() +
+  geom_text(mapping = aes(label = species), size = 2, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_manual(values = CLASS_COLOURS) +
+  scale_shape_manual(values = CLASS_SHAPES) +
+  facet_wrap(facets = vars(version), scales = "free_y") +
+  labs(x = "CBBC density (territories / km²)", y = "BAM point counts (species means)", colour = NULL, shape = NULL) +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**How to read:** if the corrected correlation with CBBC is higher, NA-POPS moves species' relative abundances toward the census. That is independent support for the corrections, separate from their absolute level.
+
+## How the absolute comparisons work {#absolute-logic}
+
+The absolute comparisons below use no statistical model. They compare the birds the BAM surveys actually counted with the birds they should have counted if CBBC densities and the NA-POPS corrections were both right. This section explains the logic, with a small invented example, before the results.
+
+### The question
+
+NA-POPS turns a point count into a density by dividing the count by the area the survey effectively sampled. Turn that around: if we knew the true density at a place, we could predict how many birds a point count there *should* record. The comparisons ask how close the counts come to that prediction. For a survey *j* assigned to CBBC grid *g*, the working assumption is
+
+> E[count~*j*~] = *k* × *A*~*j*~ × *D*~*g*~
+
+where *D*~*g*~ is the CBBC territory density at the grid (territories / km²), *A*~*j*~ is the survey's NA-POPS effective area (km²), and *k* is a single number per species. If the CBBC densities still describe the area the points sample, and the NA-POPS corrections are right, then *k* = 1. If *k* = 2, the point counts recorded twice as many birds as CBBC density and NA-POPS together predict.
+
+### The ingredients
+
+**CBBC density, *D*~*g*~.** Territories on the plot divided by plot area (× 100 to convert from ha to km²). A plot with 3 territories on 10 ha has *D* = 30 territories / km². If a grid was censused in several years, *D*~*g*~ is the mean across those years. Only grids where CBBC found the species are used (its CBBC-positive grids).
+
+**Effective area, *A*~*j*~.** The area within which the survey would have detected every bird if detection were perfect. It combines availability (the chance a bird sings or calls during the count, which depends on the count's duration, date and time of day), the species' effective detection radius (EDR), and the survey's distance limit; the formula is in Section \@ref(species-compared). For a species with EDR = 80 m, a 5-min unlimited-distance count with availability 0.8 has *A* = 0.8 × π × 0.08² ≈ 0.016 km² (about 1.6 ha). The same count truncated at 50 m has *A* ≈ 0.005 km², because only 1 − exp(−(50/80)²) ≈ 32% of the effective area lies within 50 m. That truncated count is *expected* to record about a third as many birds, which is exactly what truncation does to the observed count, so surveys run under different protocols are put on the same footing.
+
+**Which surveys go with which grid.** Every retained BAM survey within 1 km of a CBBC plot is assigned to the nearest plot, so a survey within 1 km of two plots is counted once, never twice.
+
+### From counts to the count ratio
+
+For each species:
+
+1. **Expected count of each survey:** *E*~*j*~ = *A*~*j*~ × *D*~*g*~.
+2. **Totals:** sum the expected counts over all the species' surveys, and sum the observed counts over the same surveys.
+3. **Count ratio:** *k* = Σ observed / Σ expected.
+
+The ratio of totals is not an arbitrary choice. If counts are Poisson with mean *k* × *E*~*j*~, the log-likelihood is Σ [*O*~*j*~ log(*k E*~*j*~) − *k E*~*j*~], and setting its derivative to zero gives *k* = Σ*O*~*j*~ / Σ*E*~*j*~: the ratio of totals is the maximum-likelihood estimate. Overdispersion (pairs or family groups counted together, clumped birds) does not bias it; it only makes it less precise, which the confidence intervals below take into account. Averaging each survey's own ratio instead would fail badly: most surveys record none of a given species against expected counts of a fraction of a bird, so their individual ratios would be 0, or very large when a single bird turned up.
+
+### A worked example
+
+An invented species, with *A* ≈ 0.016 km² for every survey (in the real data *A* varies a little between surveys):
+
+| Grid | Plot size | Territories on plot | *D* (/ km²) | Surveys | Expected | Observed | Grid ratio |
+|---|---|---|---|---|---|---|---|
+| G1 | 10 ha | 3 | 30 | 2 | 2 × 0.016 × 30 = 0.96 | 1 | 1.04 |
+| G2 | 100 ha | 15 | 15 | 40 | 40 × 0.016 × 15 = 9.60 | 20 | 2.08 |
+| G3 | 40 ha | 4 | 10 | 8 | 8 × 0.016 × 10 = 1.28 | 1 | 0.78 |
+| **Total** | | | | 50 | **11.84** | **22** | ***k* = 1.86** |
+
+The species' count ratio (1.86) is close to G2's ratio (2.08), even though G1 and G3 both suggest agreement. The reason is visible if *k* is rewritten as a weighted average of the grid ratios, *k* = Σ~*g*~ *w*~*g*~ *k*~*g*~, where each grid's weight *w*~*g*~ is its share of the total expected count: 8% for G1, 81% for G2 and 11% for G3. A grid's expected count is (number of surveys) × (effective area) × (CBBC density), so **a grid's influence on the count ratio is proportional to its survey effort multiplied by its CBBC density.**
+
+### CBBC plots of very different sizes
+
+Plot size does **not** weight the count ratio directly. It enters only through density, which already divides territories by plot area. In the example, G1 (10 ha) and G2 (100 ha) are weighted by their surveys and densities, not their sizes: had G1 been a 100 ha plot with 30 territories, its density, and everything downstream, would be unchanged. That is usually what we want, because the BAM surveys sample the 1 km circle around a plot (about 314 ha) regardless of how large the plot is.
+
+Plot size still matters in three ways that the count ratio does not adjust for, because it treats CBBC density as known:
+
+- **Precision of the density.** On a 10 ha plot, one territory more or less changes density by 10 / km², so G1's 30 / km² could easily have been 20 or 40. On a 100 ha plot, one territory changes density by 1 / km².
+- **Edge effects.** Territories straddling the plot boundary are counted as fractions, and a "+" (part of a territory) is coded as 0.1 territory, which on a 10 ha plot is 1 territory / km² on its own. Small plots tend to overstate density because edge territories make up a larger share of them.
+- **Habitat match.** A 10 ha plot is about 3% of the 1 km matching circle, so the points around it can easily sample habitat the plot does not represent; a 100 ha plot covers about a third of the circle (Table \@ref(tab:step1-plots-1)).
+
+So small plots bring noisier, possibly inflated and less representative densities into the count ratio, but no extra weight. This is why P1 drops plots under 10 ha, and why plot size is a term in the site-level regression below.
+
+### CBBC plots with very different numbers of point counts
+
+Survey effort **does** weight the count ratio directly: doubling the surveys at a grid doubles both its observed and expected totals, and so doubles its weight. That is reasonable when the extra surveys carry extra information (more points spread around the plot, or more years), and less so when they mostly repeat the same few points. In these data the busiest CBBC site has well over 100 retained surveys while the median site has a handful (Table \@ref(tab:step1b-1)), so one site can decide a species' count ratio almost on its own, as G2 does in the example. The per-species table below therefore reports the share of each species' expected count that comes from its single largest site.
+
+Repeat visits to the same point are not independent either: the same territorial birds are counted visit after visit, so 40 surveys at G2 may amount to a few independent samples of the birds around one location. This does not bias the count ratio, but a naive Poisson standard error would be far too small. The 95% sampling intervals therefore start from a **site bootstrap**:
+
+1. Draw sites at random, with replacement, as many as the species has.
+2. Keep *all* of each drawn site's surveys together, so repeat visits and nearby points move as a block.
+3. Recompute the count ratio for that resample.
+4. Repeat `r N_BOOT` times; the 2.5th and 97.5th percentiles of the resampled ratios form the 95% interval.
+
+Because whole sites are resampled, the interval reflects how much the result depends on which sites happened to be surveyed, including clustering and overdispersion. It also exposes dominance by one site. In the example, about 30% of resamples contain no copy of G2 ((2/3)³), and in those the count ratio comes from G1 and G3 alone, about 2 / 2.24 ≈ 0.9; resamples containing G2, sometimes twice, give about 2. The bootstrap distribution has two peaks and the interval becomes wide and lopsided, sometimes with the point estimate near one end. With fewer than about 10 sites, or one dominant site, treat the interval as a rough guide rather than a reliable 95% interval.
+
+The bootstrap breaks down when few or no birds were counted. If no site recorded the species, every resample gives a count ratio of 0, and the interval collapses to 0–0 even though, say, 20 birds were expected; a zero count is still consistent with a true ratio above 0. So the reported interval is the wider of the bootstrap interval and the **exact Poisson interval** for the total count, divided by the expected count. With no birds counted, the exact Poisson upper bound on the total is about 3.7 birds, so with 20 expected the upper bound of the count ratio is about 0.18. The Poisson interval ignores clustering, which is why it is used only to widen the bootstrap interval, never to narrow it.
+
+### Two ways to weight plots
+
+The second absolute comparison, the **plot-averaged density ratio**, weights plots differently. It first converts each grid's counts to a corrected density (Σ count / Σ effective area at that grid), then divides the mean of those densities across grids by the mean CBBC density across the same grids. This works out to a weighted average of the grid ratios with weights proportional to CBBC density alone, ignoring survey effort:
+
+| Comparison | Weights (G1 / G2 / G3) | Result in the example |
+|---|---|---|
+| Count ratio | 8% / 81% / 11% (survey effort × CBBC density) | 1.86 |
+| Plot-averaged density ratio | 55% / 27% / 18% (CBBC density only) | (31.3 + 31.3 + 7.8) / (30 + 15 + 10) ≈ 1.28 |
+
+Neither weighting is wrong; they answer slightly different questions. The **count ratio** asks whether, across all the counting that was done, the counts matched the prediction; it uses the survey effort efficiently, but one heavily surveyed site can dominate it. The **plot-averaged density ratio** asks whether, taking the CBBC plots one at a time, corrected densities matched; a plot with 2 surveys counts as much as one with 100, so it is noisier, but no single site can dominate it through effort alone. When the two differ by more than about 2× for a species, one or two heavily surveyed sites are driving the count ratio, and that species' result should be read with caution.
+
+### What the ratios do and do not tell you
+
+A ratio of 1 means NA-POPS-corrected counts reproduce CBBC territory densities on average for that species. It does not, on its own, show that availability and EDR are right, because other things move the ratios:
+
+- **Above 1:** pairs, fledglings and non-territorial birds add to counts but not to territories, and spot mapping misses some territories.
+- **Below 1:** population declines since the censuses, and using only CBBC-positive grids, which selects grids where CBBC density was high partly by chance.
+
+The detection-rate check below complements both ratios, because it compares how often surveys detect the species at all, which pairs and family groups do not inflate.
+
+The intervals around both ratios are sampling intervals: they take the NA-POPS corrections and the CBBC densities as given. Errors in the corrections, above all in EDR, move every species' ratio together, by an amount the intervals do not show (Step 2).
+
+## Count ratio: birds counted vs birds expected {#observed-expected}
+
+**What this shows.** For each species, the total number of birds counted by its surveys divided by the total expected from CBBC density and each survey's NA-POPS effective area (the observed and expected counts of Table \@ref(tab:step1-species-2)). This is the main absolute comparison in the report.
+
+```{r step3-count-ratio}
+count_ratio <- count_ratio_summary(df = survey_data)
+
+bind_rows(
+  `Territorial` = count_ratio_agreement(df = filter(count_ratio, territorial)),
+  `All species` = count_ratio_agreement(df = count_ratio),
+  .id = "subset"
+) |>
+  kable(digits = 2, col.names = c("Species", "Number of species", "Median count ratio", "Median fold difference (either direction)",
+                                  "Share within 2x", "Share within 5x", "Species with no birds counted"),
+        caption = "Count ratio (birds counted / birds expected): median across species, median fold difference from agreement in either direction, and share of species within 2x and 5x of agreement", label = "step3-count-ratio-1")
+
+count_ratio |>
+  filter(territorial) |>
+  arrange(k) |>
+  transmute(species,
+            `CBBC-positive sites` = n_sites,
+            Surveys = n_surveys,
+            `Birds counted` = observed,
+            `Birds expected` = round(expected, 1),
+            `Count ratio (95% sampling interval)` = sprintf("%.2f (%.2f-%.2f)", k, k_lcl, k_ucl),
+            `Largest site's share of expected` = pct(max_site_share)) |>
+  kable(caption = "Count ratio by territorial species, with its 95% sampling interval (wider of the site bootstrap and the exact Poisson interval), and the share of the expected count contributed by the species' single largest site (a large share means one site dominates the ratio)", label = "step3-count-ratio-2")
+
+terr_count_ratio <- count_ratio_agreement(df = filter(count_ratio, territorial))
+```
+
+```{r step3-count-ratio-plot, fig.cap = "Count ratio (birds counted / birds expected) by species, with 95% sampling intervals. Species with no birds counted cannot be shown on the log scale.", fig.height = fig_height(nrow(count_ratio))}
+plot_ratio(summary = rename(count_ratio, ratio = k, ratio_lcl = k_lcl, ratio_ucl = k_ucl),
+           xlab = "Count ratio: birds counted / birds expected")
+```
+
+```{r step3-count-totals, fig.cap = "Birds counted vs birds expected, by species (totals over each species' surveys at its CBBC-positive grids).", fig.height = 6}
+plot_pair(df = count_ratio, x = "expected", y = "observed",
+          xlab = "Birds expected (CBBC density x NA-POPS effective area)", ylab = "Birds counted")
+```
+
+For territorial species, the median count ratio is **`r round(terr_count_ratio$median_k, 2)`**, with `r pct(terr_count_ratio$within_2x)` of species within 2× of agreement and a median fold difference of `r round(terr_count_ratio$median_abs_fold, 2)` in either direction.
+
+**How to read:**
+
+- **Systematic bias vs scatter.** The median count ratio shows whether counts run systematically above or below what CBBC densities and NA-POPS predict; the median fold difference shows how far individual species typically are from agreement in either direction. A median near 1 with large scatter means no overall bias but poor species-level agreement.
+- **Dominant sites.** Where one site supplies most of a species' expected count, its ratio mostly reflects that site, and its interval is unreliable (see the explanation above). Compare with the plot-averaged density ratio in Section \@ref(plot-averaged).
+- **Species far from 1** are better explained by species-specific population change since the census (for example, spruce budworm specialists such as Bay-breasted and Cape May Warblers, abundant during 1970s–80s outbreaks) than by detectability, which would affect related species similarly.
+
+## Plot-averaged density ratio: equal weight per plot {#plot-averaged}
+
+**What this shows.** For each species, the mean NA-POPS-corrected point-count density across its CBBC-positive grids, divided by the mean CBBC density over the same grids. Each plot contributes equally, however many surveys it has, so this checks whether the count ratio is being driven by a few heavily surveyed sites. Both ratios use the same surveys at each plot (each survey assigned to its nearest plot), so differences between them come from how plots are weighted. Intervals come from the site bootstrap alone; a species with no birds counted gets a ratio of 0 with a degenerate interval here, so use its count-ratio interval instead.
+
+```{r step3-density-ratio}
+density_ratio <- ratio_summary(df = four, num = bam_dens_km2, den = cbbc_dens_km2)
+
+bind_rows(
+  `Territorial` = agreement_summary(df = filter(density_ratio, territorial)),
+  `All species` = agreement_summary(df = density_ratio),
+  .id = "subset"
+) |>
+  kable(digits = 2, col.names = c("Species", "Number of species", "Median density ratio", "Share within 2x", "Share within 5x",
+                                  "Share within 10x", "Median Spearman across plots"),
+        caption = "Plot-averaged density ratio (corrected point-count density / CBBC density): median across species, share of species within 2x, 5x and 10x, and median within-species Spearman correlation across plots", label = "step3-density-ratio-1")
+
+terr_density_ratio <- agreement_summary(df = filter(density_ratio, territorial))
+```
+
+```{r step3-density-ratio-plot, fig.cap = "Plot-averaged density ratio (corrected point-count density / CBBC density) by species, with 95% site-bootstrap sampling intervals.", fig.height = fig_height(nrow(density_ratio))}
+plot_ratio(summary = density_ratio, xlab = "Plot-averaged density ratio: corrected point-count density / CBBC density")
+```
+
+```{r step3-density-means, fig.cap = "Species mean densities at CBBC-positive grids: NA-POPS-corrected point counts vs CBBC.", fig.height = 6}
+plot_pair(df = density_ratio, x = "den_mean", y = "num_mean",
+          xlab = "CBBC mean density (territories / km²)", ylab = "Point-count mean density, NA-POPS corrected (birds / km²)")
+```
+
+For territorial species, the median plot-averaged density ratio is **`r round(terr_density_ratio$median_ratio, 2)`**, with `r pct(terr_density_ratio$within_2x)` of species within 2× and `r pct(terr_density_ratio$within_10x)` within 10×.
+
+## When the two ratios disagree
+
+**What this shows.** Species whose count ratio and plot-averaged density ratio differ by more than 2×. For these, the two ways of weighting plots give different answers, usually because one or two heavily surveyed sites dominate the count ratio.
+
+```{r step3-ratio-compare, fig.cap = "Count ratio vs plot-averaged density ratio, by species. Line: the two ratios agree; dashed lines: 2x apart.", fig.height = 6}
+ratio_pairs <- count_ratio |>
+  select(species, species_class, count_ratio = k, max_site_share, n_sites) |>
+  inner_join(y = select(density_ratio, species, density_ratio = ratio), by = "species") |>
+  mutate(fold_apart = count_ratio / density_ratio)
+
+ratio_pairs |>
+  filter(count_ratio > 0, density_ratio > 0) |>
+  ggplot(mapping = aes(x = density_ratio, y = count_ratio, colour = species_class, shape = species_class)) +
+  geom_abline(intercept = 0, slope = 1, colour = "grey30") +
+  geom_abline(intercept = log10(c(0.5, 2)), slope = 1, linetype = "dashed", colour = "grey55") +
+  geom_point() +
+  geom_text(mapping = aes(label = species), size = 2.2, vjust = -0.7, check_overlap = TRUE, show.legend = FALSE) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_manual(values = CLASS_COLOURS) +
+  scale_shape_manual(values = CLASS_SHAPES) +
+  labs(x = "Plot-averaged density ratio", y = "Count ratio", colour = NULL, shape = NULL) +
+  theme_bw() +
+  theme(legend.position = "top")
+
+ratio_pairs |>
+  filter(is.finite(fold_apart), abs(log(fold_apart)) > log(2)) |>
+  arrange(desc(abs(log(fold_apart)))) |>
+  transmute(species,
+            `CBBC-positive sites` = n_sites,
+            `Count ratio` = round(count_ratio, 2),
+            `Plot-averaged density ratio` = round(density_ratio, 2),
+            `Largest site's share of expected` = pct(max_site_share)) |>
+  kable(caption = "Species whose count ratio and plot-averaged density ratio differ by more than 2x, with the share of the expected count contributed by the species' largest site", label = "step3-ratio-compare-1")
+```
+
+**How to read:** points near the line mean the result does not depend on how plots are weighted. Species in the table deserve caution: if one site supplies a large share of the expected count, the count ratio mostly describes that site, and the plot-averaged density ratio is the fairer summary of the species.
+
+## Population change since the census
+
+**What this tests.** Whether the disagreement for each species follows the time between the census and the point counts. This matters most for the question of whether QPAD inflates density. If a species declined by 30% after its census, a correct QPAD estimate would sit at about 0.7× the CBBC density, and a ratio of 1 would itself indicate inflation. Population change therefore masks QPAD inflation for declining species and exaggerates it for increasing ones.
+
+```{r step3-time, fig.cap = "Count ratio vs median years between the CBBC census and the point counts, by species."}
+# Median census-to-survey gap per species, across its CBBC-positive grids
+year_gap_species <- survey_data |>
+  group_by(species, SITEID) |>
+  summarise(year_gap = mean(year) - first(cbbc_year_mean), .groups = "drop") |>
+  group_by(species) |>
+  summarise(median_year_gap = median(year_gap), .groups = "drop")
+
+time_data <- count_ratio |>
+  filter(is.finite(k), k > 0) |>
+  left_join(y = year_gap_species, by = "species")
+
+ggplot(data = time_data, mapping = aes(x = median_year_gap, y = k)) +
+  geom_hline(yintercept = 1, colour = "grey30") +
+  geom_hline(yintercept = c(0.5, 2), linetype = "dashed", colour = "grey55") +
+  geom_point(colour = CLASS_COLOURS[["Territorial"]], shape = CLASS_SHAPES[["Territorial"]]) +
+  geom_text(mapping = aes(label = species), size = 2.2, vjust = -0.7, check_overlap = TRUE) +
+  scale_y_log10(breaks = RATIO_BREAKS, labels = fold_labels) +
+  labs(x = "Median years between CBBC census and point counts", y = "Count ratio (birds counted / birds expected)",
+       caption = "Lines: agreement (solid) and 2x (dashed)") +
+  theme_bw()
+```
+
+**How to read:** a trend in the count ratio with years since the census points to population change (or changing census methods) rather than detectability. The time gap alone cannot separate the two: correcting for it would need each species' population trend over the census-to-survey period.
+
+## Detection-rate check
+
+**What this tests.** A second check that is insensitive to how many birds were recorded per detection. If CBBC density and the NA-POPS corrections were both right, a survey with effective area *a* would detect the species (count at least one bird) with probability 1 − exp(−D~CBBC~ × *a*). The observed share of surveys detecting the species is compared with this expectation. It is evaluated per survey, not per grid, because repeat visits to the same point re-survey the same birds.
+
+```{r step3-detection, fig.cap = "Detection-rate check, territorial species at CBBC-positive grids: observed vs expected share of surveys detecting the species."}
+# Detection frequency at CBBC-positive sites. A single survey's count is
+# Poisson(D x area) if CBBC density and the corrections are right, so
+# P(detected) = 1 - exp(-D x area). Evaluated per survey, not per site,
+# because repeat visits to the same point re-survey the same birds and are not
+# independent draws.
+detection_check <- survey_data |>
+  filter(territorial) |>
+  mutate(detected     = count > 0,
+         p_detect_exp = 1 - exp(-cbbc_dens_km2 * area_km2)) |>
+  group_by(species) |>
+  summarise(n_surveys  = n(),
+            detect_obs = mean(detected),
+            detect_exp = mean(p_detect_exp),
+            .groups    = "drop") |>
+  mutate(obs_over_exp = detect_obs / detect_exp)
+
+detection_summary <- detection_check |>
+  summarise(n_species            = n(),
+            median_detect_obs    = median(detect_obs),
+            median_detect_exp    = median(detect_exp),
+            median_obs_over_exp  = median(obs_over_exp),
+            share_obs_below_exp  = mean(detect_obs < detect_exp))
+
+kable(detection_summary, digits = 2,
+      caption = "Detection-rate check at CBBC-positive grids (territorial species): observed vs expected share of surveys detecting the species", label = "step3-detection-1")
+
+ggplot(data = detection_check, mapping = aes(x = detect_exp, y = detect_obs)) +
+  geom_abline(intercept = 0, slope = 1, colour = "grey30") +
+  geom_point(colour = CLASS_COLOURS[["Territorial"]], shape = CLASS_SHAPES[["Territorial"]]) +
+  geom_text(mapping = aes(label = species), size = 2.2, vjust = -0.7, check_overlap = TRUE) +
+  coord_fixed(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(x = "Expected share of surveys detecting the species (CBBC density x NA-POPS area)",
+       y = "Observed share of surveys detecting the species",
+       caption = "Line: agreement") +
+  theme_bw()
+```
+
+At CBBC-positive grids, surveys detected species a median `r pct(detection_summary$median_detect_obs)` of the time, against `r pct(detection_summary$median_detect_exp)` expected.
+
+**How to read:** if the detection rate matches expectation while the count ratio is above 1, the excess comes from more birds per detection (pairs, family groups), not from the detection probabilities. If surveys detect species less often than expected, they are sampling other habitat, the species has declined, or birds are more clumped than a Poisson count assumes (which lowers the chance of detecting at least one bird for the same mean count).
+
+## Which plots disagree most?
+
+**What this tests:** which site characteristics are associated with larger disagreement:
+
+- plot size (a control; see below for why it cannot be read as an edge effect);
+- census effort (visits per census);
+- census year (older census methods, or population change).
+
+Each site's community ratio sums the territorial species CBBC found there: summed NA-POPS-corrected BAM density divided by summed CBBC density.
+
+```{r step3c}
+community_4 <- four |>
+  filter(territorial) |>
+  group_by(SITEID, plot_ha, visits_mean, cbbc_year_mean) |>
+  summarise(bam_total = sum(bam_dens_km2), cbbc_total = sum(cbbc_dens_km2), .groups = "drop") |>
+  filter(bam_total > 0, cbbc_total > 0) |>
+  mutate(community_ratio = bam_total / cbbc_total)
+
+fit_4c <- lm(formula = log(community_ratio) ~ log(visits_mean) + log(plot_ha) + I(cbbc_year_mean - 1975),
+             data = community_4)
+kable(coef(summary(fit_4c)), digits = 3,
+      caption = "log(site community ratio, corrected BAM / CBBC) ~ census visits + plot size + census year (centred on 1975)", label = "step3c-1")
+
+plot_size_leverage(fit = fit_4c, data = community_4) |>
+  kable(digits = 3, col.names = c("Sites used", "Number of sites", "log(plot size) estimate", "Std. Error", "Pr(>|t|)"),
+        caption = sprintf("Leverage check: log(plot size) coefficient with all sites and without plots larger than %g ha", LARGE_PLOT_HA),
+        label = "step3c-2")
+```
+
+**How to read:** these terms capture remaining CBBC census-quality effects (coverage, older methods) and population change since the census.
+
+- **Plot size is a control, not a measured edge effect.** Most matched plots are 10–16 ha (Table \@ref(tab:step1-plots-1)): squares with sides of about 316 to 400 m. Over that range the share of a plot lying within one territory radius of its edge changes only modestly (about 53% to 44% for territories 100 m across), so a genuine edge effect could not change the ratio by more than a little. A large plot-size coefficient is therefore more likely to reflect a few larger plots with high leverage, or plots of different sizes differing in habitat, region or era. Table \@ref(tab:step3c-2) shows how much the coefficient depends on the plots larger than `r LARGE_PLOT_HA` ha. Any tendency to over-count edge territories affects almost every matched plot similarly, so it cannot be estimated from these plot sizes.
+- **Plot habitat is not included:** restricting to CBBC-positive grids removes most of the habitat mismatch between plots and nearby points, which showed up as BAM detections of species absent from the plot.
+- **Matching radius.** The 1 km matching radius was chosen over 2 km because density declined about 11% from 0-1 km to 1-2 km at the same sites, as habitat shifted away from the plot's.
+
+# Step 4: Synthesis
+
+```{r step4}
+synthesis <- tribble(
+  ~step, ~comparison, ~metric, ~value,
+  "1", "CBBC vs BAM uncorrected (composition, all species, all matched sites)", "Spearman, species shares", cor_1e$spearman[1],
+  "3", "CBBC vs BAM corrected (composition, all species)", "Spearman, species means", cor_4a$spearman[2],
+  "3", "Count ratio: birds counted / birds expected (territorial)", "Median ratio", terr_count_ratio$median_k,
+  "3", "Count ratio: birds counted / birds expected (territorial)", "Median fold difference (either direction)", terr_count_ratio$median_abs_fold,
+  "3", "Count ratio: birds counted / birds expected (territorial)", "Share within 2x", terr_count_ratio$within_2x,
+  "3", "Plot-averaged density ratio (territorial)", "Median ratio", terr_density_ratio$median_ratio,
+  "3", "Plot-averaged density ratio (territorial)", "Share within 2x / 10x", NA_real_,
+  "3", "Detection-rate check (territorial)", "Observed / expected, median", detection_summary$median_obs_over_exp
+) |>
+  mutate(value = case_when(
+    metric == "Share within 2x / 10x" ~ paste(pct(terr_density_ratio$within_2x), "/", pct(terr_density_ratio$within_10x)),
+    metric == "Share within 2x"       ~ pct(value),
+    .default                          = sprintf("%.2f", value)
+  ))
+
+kable(synthesis, col.names = c("Step", "Comparison", "Metric", "Value"), caption = "Key results across steps (comparisons at CBBC-positive grids, except the step 1 composition comparison)", label = "step4-1")
+```
+
+**Reading across the steps:** an inference is robust if it holds in unitless comparisons (composition, steps 1 and 3) *and* in absolute ones (the count ratio and the plot-averaged density ratio), and is not explained by the support or timing issues identified along the way. The count ratio is the main absolute measure: it needs no statistical model, is the maximum-likelihood estimate under a simple Poisson assumption, and its sampling intervals reflect clustering and overdispersion (but not uncertainty in the corrections, which is dominated by EDR; Step 2). The plot-averaged density ratio shows whether a species' result depends on a few heavily surveyed sites, and the detection-rate check is insensitive to how many birds were recorded per detection.
+
+# Settings used {#settings-used}
+
+```{r settings}
+settings <- list(P1 = s1, P2 = s2, P3 = s3)
+str(settings, give.attr = FALSE, vec.len = 10)
+sessionInfo()
+```
