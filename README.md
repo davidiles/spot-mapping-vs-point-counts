@@ -1314,15 +1314,16 @@ insensitive to how many birds were recorded per detection.
     ##  [9] tidyr_1.3.2     tibble_3.3.1    ggplot2_4.0.2   tidyverse_2.0.0
     ## 
     ## loaded via a namespace (and not attached):
-    ##  [1] generics_0.1.4     class_7.3-23       KernSmooth_2.23-26 stringi_1.8.7     
-    ##  [5] hms_1.1.4          digest_0.6.39      magrittr_2.0.4     evaluate_1.0.5    
-    ##  [9] grid_4.5.2         timechange_0.3.0   RColorBrewer_1.1-3 bookdown_0.44     
-    ## [13] fastmap_1.2.0      rprojroot_2.1.1    e1071_1.7-17       DBI_1.3.0         
-    ## [17] scales_1.4.0       cli_3.6.5          rlang_1.1.7        units_1.0-1       
-    ## [21] withr_3.0.3        yaml_2.3.12        otel_0.2.0         tools_4.5.2       
-    ## [25] tzdb_0.5.0         here_1.0.1         vctrs_0.7.1        R6_2.6.1          
-    ## [29] proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    pkgconfig_2.0.3   
-    ## [33] pillar_1.11.1      gtable_0.3.6       Rcpp_1.1.1         glue_1.8.0        
-    ## [37] xfun_0.62          tidyselect_1.2.1   rstudioapi_0.17.1  dichromat_2.0-0.1 
-    ## [41] farver_2.1.2       htmltools_0.5.9    labeling_0.4.3     rmarkdown_2.32    
-    ## [45] compiler_4.5.2     S7_0.2.1
+    ##  [1] sass_0.4.10        generics_0.1.4     class_7.3-23       KernSmooth_2.23-26
+    ##  [5] stringi_1.8.7      hms_1.1.4          digest_0.6.39      magrittr_2.0.4    
+    ##  [9] evaluate_1.0.5     grid_4.5.2         timechange_0.3.0   RColorBrewer_1.1-3
+    ## [13] bookdown_0.44      fastmap_1.2.0      rprojroot_2.1.1    jsonlite_2.0.0    
+    ## [17] e1071_1.7-17       DBI_1.3.0          scales_1.4.0       jquerylib_0.1.4   
+    ## [21] cli_3.6.5          rlang_1.1.7        units_1.0-1        withr_3.0.3       
+    ## [25] cachem_1.1.0       yaml_2.3.12        otel_0.2.0         tools_4.5.2       
+    ## [29] tzdb_0.5.0         here_1.0.1         vctrs_0.7.1        R6_2.6.1          
+    ## [33] proxy_0.4-29       lifecycle_1.0.5    classInt_0.4-11    pkgconfig_2.0.3   
+    ## [37] pillar_1.11.1      bslib_0.12.0       gtable_0.3.6       Rcpp_1.1.1        
+    ## [41] glue_1.8.0         xfun_0.62          tidyselect_1.2.1   rstudioapi_0.17.1 
+    ## [45] dichromat_2.0-0.1  farver_2.1.2       htmltools_0.5.9    labeling_0.4.3    
+    ## [49] rmarkdown_2.32     compiler_4.5.2     S7_0.2.1
