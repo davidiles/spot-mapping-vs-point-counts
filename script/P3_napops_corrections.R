@@ -45,7 +45,7 @@ library(napops)
 
 # Analysis folder inside the project (here::here() starts from the folder
 # holding Spot_Mapping_vs_Point_Counts.Rproj)
-ANALYSIS_DIR <- here::here("CBBC_vs_BAM")
+ANALYSIS_DIR <- here::here()
 
 P1_PATH  <- file.path(ANALYSIS_DIR, "output", "P1_cbbc_prepared.rds")
 P2_PATH  <- file.path(ANALYSIS_DIR, "output", "P2_bam_matched.rds")
