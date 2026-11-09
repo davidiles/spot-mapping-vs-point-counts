@@ -1,7 +1,7 @@
 # ==============================================================================
 # P2_match_bam_surveys.R
 #
-# PREPARATION STEP 2 OF 4 (no inferences; run once, output cached)
+# PREPARATION STEP 2 OF 5 (no inferences; run once, output cached)
 #
 # Finds BAM point-count surveys near each retained CBBC site (from P1), applies
 # the survey filters, computes time since sunrise, and attaches the counts.
