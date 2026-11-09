@@ -1,7 +1,7 @@
 # ==============================================================================
 # P3_napops_corrections.R
 #
-# PREPARATION STEP 3 OF 4 (no inferences; run once, output cached)
+# PREPARATION STEP 3 OF 5 (no inferences; run once, output cached)
 #
 # Defines the species compared at matched sites and computes NA-POPS
 # detectability corrections for every retained BAM survey x species.
@@ -26,7 +26,8 @@
 #   species_candidates   species with CBBC territories at >= MIN_SITES_CBBC
 #                        matched sites (whether or not BAM detected them), with
 #                        NA-POPS family and flags in_napops / detected_nearby /
-#                        territorial
+#                        comparable (FALSE for species in P1's
+#                        non_comparable_species list)
 #   survey_species       retained survey x candidate species (in BAM): count
 #                        (0 if not detected) and, for NA-POPS species, p, EDR
 #                        and effective area
@@ -86,6 +87,14 @@ try_napops <- function(expr, sp, what) {
 p1 <- readRDS(file = P1_PATH)
 p2 <- readRDS(file = P2_PATH)
 
+# The comparable flag (section 2) comes from P1's list of non-comparable
+# species. Stop if P1 was saved before that list existed: otherwise every
+# species would silently be flagged comparable.
+non_comparable_species <- attr(x = p1, which = "settings")$non_comparable_species
+if (is.null(non_comparable_species)) {
+  stop("P1 settings have no non_comparable_species: re-run P1_prepare_cbbc.R first.")
+}
+
 matched_sites <- unique(p2$site_survey$SITEID)
 
 # NA-POPS results release in use (the package version does not identify it)
@@ -120,7 +129,7 @@ species_candidates <- p1$cbbc_long |>
   left_join(y = select(napops_table, species = Species, common_name = Common_Name, family = Family), by = "species") |>
   mutate(in_napops       = species %in% napops_ok,
          detected_nearby = species %in% p2$bam_counts$species,
-         territorial     = !species %in% attr(x = p1, which = "settings")$exclude_species)
+         comparable      = !species %in% non_comparable_species)
 
 cat("Candidate species: ", nrow(species_candidates),
     " | with NA-POPS models: ", sum(species_candidates$in_napops),
@@ -208,7 +217,7 @@ applied <- survey_species |>
 
 species_corrections <- species_corr |>
   left_join(y = applied, by = "species") |>
-  left_join(y = select(species_candidates, species, n_sites_cbbc, territorial), by = "species")
+  left_join(y = select(species_candidates, species, n_sites_cbbc, comparable), by = "species")
 
 # ==============================================================================
 # 5. Save
