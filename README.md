@@ -2,7 +2,7 @@ Do NA-POPS-corrected point counts reproduce spot-mapping densities?
 Canadian Breeding Bird Census vs BAM
 ================
 David Iles, assisted by Opus 5.5 and GPT-6 Sol
-06 November 2026
+09 November 2026
 
 - [1 Overview](#1-overview)
 - [2 Data sources](#2-data-sources)
@@ -35,6 +35,7 @@ David Iles, assisted by Opus 5.5 and GPT-6 Sol
     census](#86-population-change-since-the-census)
   - [8.7 Detection-rate check](#87-detection-rate-check)
   - [8.8 Which plots disagree most?](#88-which-plots-disagree-most)
+  - [8.9 PIF corrections instead of NA-POPS](#pif-vs-napops)
 - [9 Step 4: Synthesis](#9-step-4-synthesis)
 - [10 Settings used](#10-settings-used)
 
@@ -57,6 +58,13 @@ censuses. It is a plausibility check on the corrections, not a
 validation of them; the limitations are set out in Section
 <a href="#purpose">5</a>.
 
+The same check is repeated with the older **Partners in Flight (PIF)**
+corrections that NA-POPS replaced in continental population estimates (a
+time-of-day adjustment instead of availability, and an expert-assigned
+detection distance instead of EDR), to see which set of corrections
+brings point counts closer to the CBBC censuses (Section
+<a href="#pif-vs-napops">8.9</a>).
+
 The rest of this README is the full report, generated from `README.Rmd`.
 The main results across all comparisons are summarised in the synthesis
 table near the end.
@@ -72,6 +80,7 @@ from local paths set at the top of each script (Section
 | **Canadian Breeding Bird Census (CBBC)** | `PLOTS` and `SPECIES` tables: plot location, size, habitat, census year and visits; territory counts per species | Database documented in Kennedy et al. (1999), CWS Technical Report 342. Held by Environment and Climate Change Canada (Canadian Wildlife Service). Census records are filtered for coordinate quality, list completeness, effort, plot size, year and habitat in `P1_prepare_cbbc.R`. |
 | **BAM point-count database (v5)** | Human point counts (no ARU recordings, no eBird checklists) within 1 km of each retained CBBC plot, with survey date, time, duration, distance limit and counts | DuckDB build `03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09`. Access through the BAM Project’s data-sharing process. |
 | **NA-POPS** | Species availability (removal) and distance (EDR) models | Through the [`napops`](https://github.com/na-pops/napops) R package; the results release used is reported in Section <a href="#napops-corrections">7</a>. The intercept-only distance model is used. |
+| **PIF corrections** | `Population_estimates_workflow_support.xlsx`: PIF time-of-day adjustment (`PIF_time_of_day`), maximum detection distance (`PIF_MDD`) and pair adjustment (`PIF_pair`) per species | Corrections used in PIF continental population estimates (Blancher et al. 2013; Stanton et al. 2019). Matched to NA-POPS species by common name in `P4_pif_corrections.R`, where MDD is used as an expert estimate of EDR. The pair adjustment is listed but not used (Section <a href="#pif-vs-napops">8.9</a>). |
 | **Bird Conservation Regions** | Boundaries for the site map | Optional; the map is drawn without them if the file is absent. |
 
 # 3 Repository structure and workflow
@@ -79,19 +88,20 @@ from local paths set at the top of each script (Section
     spot-mapping-vs-point counts/
     ├── *.Rproj            RStudio project (sets the project root used by here::here())
     ├── README.Rmd         this report; knits to README.md and README_files/
-    ├── script/            preparation scripts P1-P3
+    ├── script/            preparation scripts P1-P4
     ├── data/              local input data (not included in the repository)
-    └── output/            cached outputs of P1-P3 (not included in the repository)
+    └── output/            cached outputs of P1-P4 (not included in the repository)
 
-The analysis has three preparation scripts, each run once with its
-output cached, followed by this report:
+The analysis has four preparation scripts, each run once with its output
+cached, followed by this report:
 
 | Step | Script | Prepares | Cached output (in `output/`) |
 |:---|:---|:---|:---|
-| 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules (recodes, split taxa, Traill’s Flycatcher, non-territorial species) | `P1_cbbc_prepared.rds` |
+| 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules (recodes, split taxa, Traill’s Flycatcher, species non-comparable between the methods) | `P1_cbbc_prepared.rds` |
 | 2 | `script/P2_match_bam_surveys.R` | BAM surveys within 1 km of each retained CBBC plot, survey filters, time since sunrise, counts | `P2_bam_matched.rds` |
 | 3 | `script/P3_napops_corrections.R` | Species compared, NA-POPS availability, EDR and effective area for every survey and species | `P3_napops_corrections.rds` |
-| 4 | `README.Rmd` | This report, knitted to `README.md` | figures in `README_files/` |
+| 4 | `script/P4_pif_corrections.R` | PIF time-of-day and maximum-detection-distance effective areas (and two hybrids) for the same surveys and species | `P4_pif_corrections.rds` |
+| 5 | `README.Rmd` | This report, knitted to `README.md` | figures in `README_files/` |
 
 Each script and the report define their settings as constants at the
 top, and record them with their outputs; Section
@@ -106,14 +116,16 @@ version.
     from.
 2.  Place the input data in `data/`, or set the data paths at the top of
     each preparation script (CBBC tables in P1, the BAM DuckDB file in
-    P2), and optionally the BCR file at the top of `README.Rmd`.
+    P2, the PIF table in P4), and optionally the BCR file at the top of
+    `README.Rmd`.
 3.  Install the R packages used: `tidyverse`, `readxl`, `sf`, `DBI`,
     `duckdb`, `suncalc`, `lutz`, `napops`, `rappdirs`, `here`, `knitr`
     and `bookdown`.
-4.  Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R` and
-    `script/P3_napops_corrections.R`, in that order. Each writes its
-    output to `output/`. Re-run them only when their inputs or settings
-    change; each later script reads the earlier ones’ outputs.
+4.  Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R`,
+    `script/P3_napops_corrections.R` and `script/P4_pif_corrections.R`,
+    in that order. Each writes its output to `output/`. Re-run them only
+    when their inputs or settings change; each later script reads the
+    earlier ones’ outputs.
 5.  Knit `README.Rmd` (in the repository root) with the Knit button.
     This writes `README.md` and its figures in `README_files/`; commit
     both so GitHub can display the report.
@@ -149,8 +161,14 @@ or more matched sites (set in P3), plus an NA-POPS model, without which
 counts cannot be corrected. Nothing about BAM detections, availability
 or EDR is used, so no species is included or excluded because of how
 well BAM and CBBC agree. Results are summarised for all species and for
-territorial species separately, because spot mapping cannot census
-colonial, flocking or non-territorial species as territories.
+**comparable** species separately. A species is **non-comparable** when
+one spot-mapped territory is a poor proxy for one bird on a point count:
+colonial, flocking, polygynous and brood-parasitic species, species
+whose territories are far larger than the plots, and Ruffed Grouse,
+whose males hold drumming territories but display mostly in spring,
+before the point-count season, so dawn counts in June miss most of them.
+The list is set in P1 (`non_comparable_species` in Section
+<a href="#settings-used">10</a>).
 
 **Sites compared.** Every comparison between CBBC and BAM uses only
 CBBC-positive grids, except the community-composition comparison in Step
@@ -206,10 +224,11 @@ last:
     in species composition, then the absolute test: the **count ratio**
     (birds counted / birds expected from CBBC densities and the NA-POPS
     corrections), checked against the **plot-averaged density ratio**,
-    which weights every CBBC plot equally.
+    which weights every CBBC plot equally. Finally, the count ratio is
+    recomputed with the PIF corrections in place of NA-POPS.
 4.  **Synthesis.** What holds across comparisons.
 
-The data are prepared by the three scripts described in Section
+The data are prepared by the four scripts described in Section
 <a href="#repository-structure-and-workflow">3</a>, whose cached outputs
 this report reads.
 
@@ -395,9 +414,9 @@ all species with CBBC territories at 10 or more matched sites; those
 with NA-POPS models are compared. No criterion uses the observed BAM
 counts, availability or EDR. Table
 <a href="#tab:step1-species-2">6.8</a> shows each species’ class
-(territorial or not), its 5-min availability and EDR, and the BAM count
-expected if NA-POPS-corrected densities equalled CBBC densities,
-alongside the count observed.
+(comparable or non-comparable), its 5-min availability and EDR, and the
+BAM count expected if NA-POPS-corrected densities equalled CBBC
+densities, alongside the count observed.
 
 **How the expected count is calculated.** It is the total number of
 birds the BAM surveys should have counted if two things were both true:
@@ -443,48 +462,48 @@ detail and given with confidence intervals.
 
 | species | common_name | Class | CBBC sites | Expected count | Observed count | 5-min availability | EDR (m) |
 |:---|:---|:---|---:|---:|---:|---:|---:|
-| RWBL | Red-winged Blackbird | Non-territorial | 21 | 271 | 485 | 0.80 | 107 |
-| RBGR | Rose-breasted Grosbeak | Territorial | 13 | 243 | 105 | 0.66 | 97 |
-| EAWP | Eastern Wood-Pewee | Territorial | 16 | 170 | 168 | 0.76 | 86 |
-| BLJA | Blue Jay | Territorial | 16 | 163 | 76 | 0.57 | 110 |
-| REVI | Red-eyed Vireo | Territorial | 17 | 161 | 335 | 0.85 | 77 |
-| OVEN | Ovenbird | Territorial | 22 | 139 | 231 | 0.84 | 91 |
-| WOTH | Wood Thrush | Territorial | 10 | 108 | 115 | 0.77 | 84 |
-| AMRO | American Robin | Territorial | 15 | 107 | 93 | 0.73 | 95 |
-| GCFL | Great Crested Flycatcher | Territorial | 16 | 84 | 95 | 0.60 | 83 |
-| VEER | Veery | Territorial | 10 | 80 | 96 | 0.73 | 102 |
-| HOWR | House Wren | Territorial | 11 | 78 | 54 | 0.89 | 81 |
-| SWTH | Swainson’s Thrush | Territorial | 15 | 77 | 58 | 0.86 | 85 |
-| TRES | Tree Swallow | Non-territorial | 10 | 52 | 91 | 0.64 | 77 |
-| RUGR | Ruffed Grouse | Territorial | 11 | 48 | 5 | 0.64 | 108 |
-| BCCH | Black-capped Chickadee | Territorial | 18 | 48 | 35 | 0.62 | 75 |
-| COGR | Common Grackle | Non-territorial | 12 | 47 | 55 | 0.54 | 92 |
-| SOSP | Song Sparrow | Territorial | 19 | 46 | 33 | 0.76 | 68 |
-| COYE | Common Yellowthroat | Territorial | 14 | 45 | 67 | 0.78 | 82 |
-| CHSP | Chipping Sparrow | Territorial | 18 | 42 | 77 | 0.79 | 73 |
-| BHCO | Brown-headed Cowbird | Non-territorial | 15 | 33 | 20 | 0.56 | 79 |
-| NOFL | Northern Flicker | Territorial | 15 | 28 | 12 | 0.56 | 125 |
-| BAOR | Baltimore Oriole | Territorial | 17 | 28 | 25 | 0.51 | 86 |
-| EUST | European Starling | Non-territorial | 11 | 28 | 286 | 0.55 | 104 |
-| YRWA | Yellow-rumped Warbler | Territorial | 14 | 27 | 27 | 0.82 | 65 |
-| DEJU | Dark-eyed Junco | Territorial | 13 | 23 | 36 | 0.78 | 63 |
-| HAWO | Hairy Woodpecker | Territorial | 15 | 23 | 39 | 0.56 | 73 |
-| EAKI | Eastern Kingbird | Territorial | 14 | 21 | 12 | 0.61 | 88 |
-| YEWA | Yellow Warbler | Territorial | 10 | 20 | 47 | 0.79 | 73 |
-| NAWA | Nashville Warbler | Territorial | 10 | 20 | 74 | 0.82 | 81 |
-| AMRE | American Redstart | Territorial | 15 | 19 | 5 | 0.78 | 60 |
-| BTNW | Black-throated Green Warbler | Territorial | 12 | 18 | 34 | 0.76 | 71 |
-| CEDW | Cedar Waxwing | Non-territorial | 12 | 17 | 20 | 0.34 | 68 |
-| WBNU | White-breasted Nuthatch | Territorial | 11 | 11 | 36 | 0.63 | 66 |
-| DOWO | Downy Woodpecker | Territorial | 15 | 6 | 8 | 0.49 | 59 |
+| RWBL | Red-winged Blackbird | Non-comparable | 21 | 271 | 485 | 0.80 | 107 |
+| RBGR | Rose-breasted Grosbeak | Comparable | 13 | 243 | 105 | 0.66 | 97 |
+| EAWP | Eastern Wood-Pewee | Comparable | 16 | 170 | 168 | 0.76 | 86 |
+| BLJA | Blue Jay | Comparable | 16 | 163 | 76 | 0.57 | 110 |
+| REVI | Red-eyed Vireo | Comparable | 17 | 161 | 335 | 0.85 | 77 |
+| OVEN | Ovenbird | Comparable | 22 | 139 | 231 | 0.84 | 91 |
+| WOTH | Wood Thrush | Comparable | 10 | 108 | 115 | 0.77 | 84 |
+| AMRO | American Robin | Comparable | 15 | 107 | 93 | 0.73 | 95 |
+| GCFL | Great Crested Flycatcher | Comparable | 16 | 84 | 95 | 0.60 | 83 |
+| VEER | Veery | Comparable | 10 | 80 | 96 | 0.73 | 102 |
+| HOWR | House Wren | Comparable | 11 | 78 | 54 | 0.89 | 81 |
+| SWTH | Swainson’s Thrush | Comparable | 15 | 77 | 58 | 0.86 | 85 |
+| TRES | Tree Swallow | Non-comparable | 10 | 52 | 91 | 0.64 | 77 |
+| RUGR | Ruffed Grouse | Non-comparable | 11 | 48 | 5 | 0.64 | 108 |
+| BCCH | Black-capped Chickadee | Comparable | 18 | 48 | 35 | 0.62 | 75 |
+| COGR | Common Grackle | Non-comparable | 12 | 47 | 55 | 0.54 | 92 |
+| SOSP | Song Sparrow | Comparable | 19 | 46 | 33 | 0.76 | 68 |
+| COYE | Common Yellowthroat | Comparable | 14 | 45 | 67 | 0.78 | 82 |
+| CHSP | Chipping Sparrow | Comparable | 18 | 42 | 77 | 0.79 | 73 |
+| BHCO | Brown-headed Cowbird | Non-comparable | 15 | 33 | 20 | 0.56 | 79 |
+| NOFL | Northern Flicker | Comparable | 15 | 28 | 12 | 0.56 | 125 |
+| BAOR | Baltimore Oriole | Comparable | 17 | 28 | 25 | 0.51 | 86 |
+| EUST | European Starling | Non-comparable | 11 | 28 | 286 | 0.55 | 104 |
+| YRWA | Yellow-rumped Warbler | Comparable | 14 | 27 | 27 | 0.82 | 65 |
+| DEJU | Dark-eyed Junco | Comparable | 13 | 23 | 36 | 0.78 | 63 |
+| HAWO | Hairy Woodpecker | Comparable | 15 | 23 | 39 | 0.56 | 73 |
+| EAKI | Eastern Kingbird | Comparable | 14 | 21 | 12 | 0.61 | 88 |
+| YEWA | Yellow Warbler | Comparable | 10 | 20 | 47 | 0.79 | 73 |
+| NAWA | Nashville Warbler | Comparable | 10 | 20 | 74 | 0.82 | 81 |
+| AMRE | American Redstart | Comparable | 15 | 19 | 5 | 0.78 | 60 |
+| BTNW | Black-throated Green Warbler | Comparable | 12 | 18 | 34 | 0.76 | 71 |
+| CEDW | Cedar Waxwing | Non-comparable | 12 | 17 | 20 | 0.34 | 68 |
+| WBNU | White-breasted Nuthatch | Comparable | 11 | 11 | 36 | 0.63 | 66 |
+| DOWO | Downy Woodpecker | Comparable | 15 | 6 | 8 | 0.49 | 59 |
 
 <span id="tab:step1-species-2"></span>Table 6.8: Species compared: BAM
 count expected if NA-POPS-corrected densities equalled CBBC densities
 (CBBC-positive grids), count observed in the same surveys, 5-min
 availability and EDR
 
-34 of 34 candidate species have NA-POPS models and are compared (28
-territorial, 6 non-territorial). 0 of them were never detected by a
+34 of 34 candidate species have NA-POPS models and are compared (27
+comparable, 7 non-comparable). 0 of them were never detected by a
 matched BAM survey.
 
 ## 6.7 Do the datasets agree on which species are common?
@@ -527,7 +546,7 @@ where it was found.
 | species     | n_species | pearson_log | spearman |
 |:------------|----------:|------------:|---------:|
 | All species |        34 |        0.63 |     0.55 |
-| Territorial |        28 |        0.68 |     0.61 |
+| Comparable  |        27 |        0.60 |     0.57 |
 
 <span id="tab:step1e-1"></span>Table 6.9: Correlation across species of
 CBBC and uncorrected BAM relative abundance (mean within-site shares,
@@ -595,12 +614,28 @@ NA-POPS corrections for the species compared
   species, so they can substantially re-order species. A rank
   correlation of 0.92 between uncorrected and corrected abundance shows
   how much they actually do.
-- **Within vs between species.** Species identity explains 71% of the
-  variation in effective area. With one EDR per species, the variation
-  within a species comes only from availability (survey duration, date
-  and time) and the distance limit. The corrections therefore act mostly
-  *between* species (composition and absolute level), and barely change
-  how sites rank *within* a species.
+- **Within vs between species.** Every survey × species combination has
+  its own effective area, and these vary in two ways:
+  - **Between species.** Each species has its own EDR and its own
+    availability model (how often it sings or calls).
+  - **Within a species, between surveys.** Availability depends on each
+    survey’s duration, day of year and time since sunrise, and a
+    distance limit truncates the area sampled (a 50 m count samples much
+    less than an unlimited-distance one). For a typical species, the
+    survey at the 90th percentile of effective area samples about 1.8
+    times the area of the survey at the 10th percentile.
+
+  “Species identity explains 71%” is the R² of a regression of log
+  effective area on species alone. It means that 71% of all the
+  variation in log effective area, across every survey and species, is
+  accounted for by differences between species’ average effective areas.
+  The remaining 29% is variation among surveys of the same species, from
+  survey protocol (duration, distance limit) and timing (date, time of
+  day). With one EDR per species, none of the within-species variation
+  comes from EDR. So the corrections act mostly *between* species,
+  setting composition and absolute level. Within a species they mainly
+  put surveys run under different protocols on a common footing, and
+  barely change how sites rank.
 - **EDR dominates.** EDR enters squared, and accounts for 77% of the
   between-species variation, so errors in EDR matter most.
 - **Precision.** EDR *sampling* error alone gives each species’ density
@@ -634,22 +669,22 @@ needs a larger correction than a loud one), independent of their
 absolute level. If the corrections were noise, agreement would not
 improve.
 
-| BAM point counts         | n_species | pearson_log | spearman |
-|:-------------------------|----------:|------------:|---------:|
-| Uncorrected, all         |        34 |        0.48 |     0.53 |
-| Corrected, all           |        34 |        0.46 |     0.44 |
-| Uncorrected, territorial |        28 |        0.61 |     0.53 |
-| Corrected, territorial   |        28 |        0.63 |     0.47 |
+| BAM point counts        | n_species | pearson_log | spearman |
+|:------------------------|----------:|------------:|---------:|
+| Uncorrected, all        |        34 |        0.48 |     0.53 |
+| Corrected, all          |        34 |        0.46 |     0.44 |
+| Uncorrected, comparable |        27 |        0.54 |     0.48 |
+| Corrected, comparable   |        27 |        0.51 |     0.41 |
 
 <span id="tab:step3a-1"></span>Table 8.1: Correlation across species of
 CBBC density with BAM point counts
 
 | measure     |   lcl |  ucl |
 |:------------|------:|-----:|
-| pearson_log | -0.17 | 0.16 |
-| spearman    | -0.26 | 0.10 |
+| pearson_log | -0.22 | 0.14 |
+| spearman    | -0.27 | 0.11 |
 
-<span id="tab:step3a-2"></span>Table 8.2: Territorial species: 95%
+<span id="tab:step3a-2"></span>Table 8.2: Comparable species: 95%
 bootstrap CI for the change in correlation with CBBC, corrected minus
 uncorrected
 
@@ -668,7 +703,50 @@ CBBC-positive grids.
 **How to read:** if the corrected correlation with CBBC is higher,
 NA-POPS moves species’ relative abundances toward the census. That is
 independent support for the corrections, separate from their absolute
-level.
+level. In this dataset the correction has little room to do so:
+
+- **What a correction can do.** Correcting divides each species’ count
+  by its effective area. On the log scales of Figure
+  <a href="#fig:step3a">8.1</a>, that shifts each species up or down by
+  the log of its effective area. Species change places only where these
+  shifts are large compared with the gaps between them.
+- **How much species differ.** Among comparable species, mean counts per
+  survey differ about 37-fold from the least to the most counted
+  species, and CBBC densities about 10-fold. Their corrections (median
+  effective area) differ only about 5.2-fold. On the log scale, counts
+  vary across species with a standard deviation of 0.78, and corrections
+  with 0.38, about 49% as much.
+- **Why EDR differences reorder few species.** EDR ranges from about 59
+  to 125 m among these species. Effective area scales with EDR², so that
+  becomes about a 4.6-fold difference in area. That is a substantial
+  correction for any one species, and EDR accounts for most of the
+  differences between species’ corrections (Table
+  <a href="#tab:step2-stats-1">7.1</a>). But it is small next to the
+  spread of the counts themselves, so it moves only species whose counts
+  were already close. That is why uncorrected and corrected abundance
+  rank species almost identically (Spearman 0.92; Table
+  <a href="#tab:step2-stats-1">7.1</a>).
+- **Judge the change by its interval.** The 95% intervals for the change
+  in correlation (Table <a href="#tab:step3a-2">8.2</a>) run from -0.27
+  to 0.11 for Spearman and from -0.22 to 0.14 for Pearson on the log
+  scale. With 27 species, a correlation of about 0.5 has a standard
+  error of roughly 0.15, so a change of a few hundredths in either
+  direction is noise.
+- **Where the correction does move species.** The species with the
+  largest EDRs (here NOFL, BLJA, VEER) get the largest effective areas,
+  so the correction lowers their densities most. If they were already
+  counted less than their CBBC densities suggest (Figure
+  <a href="#fig:step3a">8.1</a>, left panel), the correction moves them
+  further from CBBC. Their low counts then come from something other
+  than detection distance, such as population change since the census,
+  behaviour that morning point counts sample poorly, or one dominant
+  site (Table <a href="#tab:step3-count-ratio-2">8.4</a>), and
+  correcting for detection distance cannot fix that.
+- **What this means.** Here, the differences between species in how
+  their counts compare with CBBC are driven far more by ecology than by
+  detectability, so this composition test has little power to judge the
+  corrections. The absolute comparisons below are more informative about
+  them.
 
 ## 8.2 How the absolute comparisons work
 
@@ -907,7 +985,7 @@ comparison in the report.
 
 | Species | Number of species | Median count ratio | Median fold difference (either direction) | Share within 2x | Share within 5x | Species with no birds counted |
 |:---|----|---:|---:|---:|---:|---:|
-| Territorial | 28 | 1.03 | 1.60 | 0.68 | 0.96 | 0 |
+| Comparable | 27 | 1.06 | 1.53 | 0.70 | 1.00 | 0 |
 | All species | 34 | 1.14 | 1.67 | 0.71 | 0.94 | 0 |
 
 <span id="tab:step3-count-ratio-1"></span>Table 8.3: Count ratio (birds
@@ -917,37 +995,36 @@ from agreement in either direction, and share of species within 2x and
 
 | species | CBBC-positive sites | Surveys | Birds counted | Birds expected | Count ratio (95% sampling interval) | Largest site’s share of expected |
 |:---|---:|---:|---:|---:|:---|:---|
-| RUGR | 6 | 208 | 5 | 47.6 | 0.10 (0.03-6.09) | 91% |
 | AMRE | 6 | 70 | 5 | 18.9 | 0.27 (0.09-0.62) | 46% |
-| NOFL | 11 | 121 | 12 | 27.9 | 0.43 (0.12-1.13) | 36% |
+| NOFL | 11 | 121 | 12 | 27.9 | 0.43 (0.08-1.11) | 36% |
 | RBGR | 9 | 220 | 105 | 243.2 | 0.43 (0.09-1.17) | 93% |
-| BLJA | 11 | 229 | 76 | 163.2 | 0.47 (0.37-2.34) | 92% |
+| BLJA | 11 | 229 | 76 | 163.2 | 0.47 (0.37-2.27) | 92% |
 | EAKI | 9 | 51 | 12 | 21.5 | 0.56 (0.29-0.98) | 32% |
-| HOWR | 8 | 56 | 54 | 77.7 | 0.70 (0.20-2.55) | 48% |
-| SOSP | 14 | 126 | 33 | 45.9 | 0.72 (0.35-1.43) | 25% |
-| BCCH | 13 | 216 | 35 | 47.5 | 0.74 (0.42-2.89) | 90% |
-| SWTH | 10 | 159 | 58 | 76.8 | 0.75 (0.53-1.45) | 44% |
-| AMRO | 11 | 207 | 93 | 107.1 | 0.87 (0.68-2.53) | 69% |
-| BAOR | 11 | 92 | 25 | 27.7 | 0.90 (0.35-3.14) | 36% |
-| YRWA | 6 | 98 | 27 | 27.4 | 0.99 (0.47-1.67) | 42% |
-| EAWP | 11 | 210 | 168 | 169.8 | 0.99 (0.29-1.19) | 72% |
-| WOTH | 7 | 157 | 115 | 108.3 | 1.06 (0.31-1.27) | 93% |
-| GCFL | 11 | 229 | 95 | 84.1 | 1.13 (0.19-1.38) | 76% |
+| HOWR | 8 | 56 | 54 | 77.7 | 0.70 (0.19-2.50) | 48% |
+| SOSP | 14 | 126 | 33 | 45.9 | 0.72 (0.34-1.46) | 25% |
+| BCCH | 13 | 216 | 35 | 47.5 | 0.74 (0.48-2.61) | 90% |
+| SWTH | 10 | 159 | 58 | 76.8 | 0.75 (0.53-1.41) | 44% |
+| AMRO | 11 | 207 | 93 | 107.1 | 0.87 (0.68-2.44) | 69% |
+| BAOR | 11 | 92 | 25 | 27.7 | 0.90 (0.34-3.12) | 36% |
+| YRWA | 6 | 98 | 27 | 27.4 | 0.99 (0.46-1.67) | 42% |
+| EAWP | 11 | 210 | 168 | 169.8 | 0.99 (0.31-1.22) | 72% |
+| WOTH | 7 | 157 | 115 | 108.3 | 1.06 (0.30-1.27) | 93% |
+| GCFL | 11 | 229 | 95 | 84.1 | 1.13 (0.17-1.38) | 76% |
 | VEER | 5 | 190 | 96 | 80.2 | 1.20 (0.00-1.46) | 79% |
-| DOWO | 10 | 110 | 8 | 5.5 | 1.45 (0.48-2.86) | 31% |
-| COYE | 10 | 99 | 67 | 44.5 | 1.51 (0.57-1.91) | 36% |
-| DEJU | 7 | 110 | 36 | 23.5 | 1.53 (1.07-2.30) | 57% |
+| DOWO | 10 | 110 | 8 | 5.5 | 1.45 (0.53-2.86) | 31% |
+| COYE | 10 | 99 | 67 | 44.5 | 1.51 (0.71-1.91) | 36% |
+| DEJU | 7 | 110 | 36 | 23.5 | 1.53 (1.07-2.29) | 57% |
 | OVEN | 13 | 315 | 231 | 139.0 | 1.66 (0.38-4.94) | 36% |
 | HAWO | 10 | 248 | 39 | 22.5 | 1.73 (0.00-2.37) | 82% |
 | CHSP | 12 | 174 | 77 | 42.0 | 1.83 (0.83-3.41) | 37% |
 | BTNW | 6 | 82 | 34 | 18.3 | 1.86 (0.00-2.59) | 63% |
-| REVI | 12 | 233 | 335 | 161.0 | 2.08 (0.71-2.63) | 62% |
-| YEWA | 7 | 78 | 47 | 20.4 | 2.30 (1.08-3.32) | 30% |
-| WBNU | 7 | 202 | 36 | 10.6 | 3.40 (1.01-5.80) | 75% |
-| NAWA | 6 | 96 | 74 | 19.7 | 3.76 (0.77-9.42) | 61% |
+| REVI | 12 | 233 | 335 | 161.0 | 2.08 (0.70-2.63) | 62% |
+| YEWA | 7 | 78 | 47 | 20.4 | 2.30 (1.23-3.27) | 30% |
+| WBNU | 7 | 202 | 36 | 10.6 | 3.40 (1.14-5.80) | 75% |
+| NAWA | 6 | 96 | 74 | 19.7 | 3.76 (0.76-10.39) | 61% |
 
 <span id="tab:step3-count-ratio-2"></span>Table 8.4: Count ratio by
-territorial species, with its 95% sampling interval (wider of the site
+comparable species, with its 95% sampling interval (wider of the site
 bootstrap and the exact Poisson interval), and the share of the expected
 count contributed by the species’ single largest site (a large share
 means one site dominates the ratio)
@@ -977,8 +1054,8 @@ CBBC-positive grids).
 
 </div>
 
-For territorial species, the median count ratio is **1.03**, with 68% of
-species within 2× of agreement and a median fold difference of 1.6 in
+For comparable species, the median count ratio is **1.06**, with 70% of
+species within 2× of agreement and a median fold difference of 1.53 in
 either direction.
 
 **How to read:**
@@ -1015,7 +1092,7 @@ instead.
 
 | Species | Number of species | Median density ratio | Share within 2x | Share within 5x | Share within 10x | Median Spearman across plots |
 |:---|----|---:|---:|---:|---:|----|
-| Territorial | 28 | 1.03 | 0.75 | 1.00 | 1.00 | 0.29 |
+| Comparable | 27 | 1.04 | 0.74 | 1.00 | 1.00 | 0.30 |
 | All species | 34 | 1.11 | 0.68 | 0.91 | 0.91 | 0.29 |
 
 <span id="tab:step3-density-ratio-1"></span>Table 8.5: Plot-averaged
@@ -1047,8 +1124,8 @@ CBBC.
 
 </div>
 
-For territorial species, the median plot-averaged density ratio is
-**1.03**, with 75% of species within 2× and 100% within 10×.
+For comparable species, the median plot-averaged density ratio is
+**1.04**, with 74% of species within 2× and 100% within 10×.
 
 ## 8.5 When the two ratios disagree
 
@@ -1132,26 +1209,26 @@ the same birds.
 
 | n_species | median_detect_obs | median_detect_exp | median_obs_over_exp | share_obs_below_exp |
 |---:|---:|---:|---:|---:|
-| 28 | 0.29 | 0.25 | 1.1 | 0.43 |
+| 27 | 0.29 | 0.27 | 1.11 | 0.41 |
 
 <span id="tab:step3-detection-1"></span>Table 8.7: Detection-rate check
-at CBBC-positive grids (territorial species): observed vs expected share
+at CBBC-positive grids (comparable species): observed vs expected share
 of surveys detecting the species
 
 <div class="figure">
 
-<img src="README_files/figure-gfm/step3-detection-1.png" alt="Detection-rate check, territorial species at CBBC-positive grids: observed vs expected share of surveys detecting the species."  />
+<img src="README_files/figure-gfm/step3-detection-1.png" alt="Detection-rate check, comparable species at CBBC-positive grids: observed vs expected share of surveys detecting the species."  />
 <p class="caption">
 
 <span id="fig:step3-detection"></span>Figure 8.8: Detection-rate check,
-territorial species at CBBC-positive grids: observed vs expected share
-of surveys detecting the species.
+comparable species at CBBC-positive grids: observed vs expected share of
+surveys detecting the species.
 </p>
 
 </div>
 
 At CBBC-positive grids, surveys detected species a median 29% of the
-time, against 25% expected.
+time, against 27% expected.
 
 **How to read:** if the detection rate matches expectation while the
 count ratio is above 1, the excess comes from more birds per detection
@@ -1171,16 +1248,16 @@ larger disagreement:
 - census effort (visits per census);
 - census year (older census methods, or population change).
 
-Each site’s community ratio sums the territorial species CBBC found
+Each site’s community ratio sums the comparable species CBBC found
 there: summed NA-POPS-corrected BAM density divided by summed CBBC
 density.
 
 |                          | Estimate | Std. Error | t value | Pr(\>\|t\|) |
 |--------------------------|---------:|------------|--------:|------------:|
-| (Intercept)              |   -5.952 | 2.733      |  -2.178 |       0.040 |
-| log(visits_mean)         |    0.463 | 0.970      |   0.478 |       0.637 |
-| log(plot_ha)             |    1.952 | 0.659      |   2.962 |       0.007 |
-| I(cbbc_year_mean - 1975) |   -0.002 | 0.037      |  -0.046 |       0.964 |
+| (Intercept)              |   -5.970 | 2.737      |  -2.181 |       0.040 |
+| log(visits_mean)         |    0.471 | 0.972      |   0.484 |       0.633 |
+| log(plot_ha)             |    1.953 | 0.660      |   2.959 |       0.007 |
+| I(cbbc_year_mean - 1975) |   -0.002 | 0.037      |  -0.045 |       0.965 |
 
 <span id="tab:step3c-1"></span>Table 8.8: log(site community ratio,
 corrected BAM / CBBC) ~ census visits + plot size + census year (centred
@@ -1188,8 +1265,8 @@ on 1975)
 
 | Sites used | Number of sites | log(plot size) estimate | Std. Error | Pr(\>\|t\|) |
 |:---|---:|---:|---:|---:|
-| All sites | 27 | 1.952 | 0.659 | 0.007 |
-| Plots \<= 16 ha | 23 | 0.045 | 0.727 | 0.951 |
+| All sites | 27 | 1.953 | 0.660 | 0.007 |
+| Plots \<= 16 ha | 23 | 0.052 | 0.731 | 0.944 |
 
 <span id="tab:step3c-2"></span>Table 8.9: Leverage check: log(plot size)
 coefficient with all sites and without plots larger than 16 ha
@@ -1217,18 +1294,237 @@ census.
   because density declined about 11% from 0-1 km to 1-2 km at the same
   sites, as habitat shifted away from the plot’s.
 
+## 8.9 PIF corrections instead of NA-POPS
+
+**Question.** Before NA-POPS, Partners in Flight (PIF) continental
+population estimates (Blancher et al. 2013; Stanton et al. 2019)
+converted Breeding Bird Survey counts to densities with two
+species-level corrections: a **time-of-day adjustment**, since replaced
+by NA-POPS availability, and a **maximum detection distance (MDD)**,
+since replaced by the NA-POPS EDR. Do the PIF corrections bring point
+counts closer to, or further from, what CBBC densities predict?
+
+**How the PIF expected count is calculated.** Exactly as the NA-POPS
+expected count (Section <a href="#species-compared">6.6</a>): the same
+surveys, the same CBBC-positive grids and the same CBBC densities. Only
+the effective area changes (computed in `P4_pif_corrections.R`):
+
+> *A*<sub>*j*</sub><sup>PIF</sup> = *p*<sub>*j*</sub><sup>PIF</sup> × π
+> × MDD² × (1 − exp(−(*r*<sub>*j*</sub> / MDD)²)) / 10<sup>6</sup>
+
+- **MDD** (m) is the PIF detection distance, treated here as an
+  expert-elicited estimate of the species’ EDR, so the formula is the
+  NA-POPS one with MDD in place of EDR. Despite the name “maximum
+  detection distance”, PIF uses it as the radius of the area a count
+  samples (π × MDD²), the role EDR plays in NA-POPS. The PIF handbook
+  (version 3.1) acknowledges that not all birds within that distance are
+  detected, notes that its distance classes tend to run larger than
+  empirical effective detection distances, and names replacing them with
+  EDRs as the next step. With the same half-normal detection function
+  for both, PIF and NA-POPS differ only in the value of the radius. For
+  unlimited-distance counts the area is *p*<sub>*j*</sub><sup>PIF</sup>
+  × π × MDD².
+- ***p*<sub>*j*</sub><sup>PIF</sup>** comes from the PIF time-of-day
+  value *T*: the share of birds counted at the mean BBS time of day
+  relative to the species’ peak time, on a 3-min BBS stop. BAM surveys
+  last 3 to 10 min, so *T* is rescaled to each survey’s duration *d*
+  (min) assuming a constant cue rate, *p*<sup>PIF</sup> = 1 − (1 −
+  *T*)<sup>*d*/3</sup>, the same rescaling used for the 5-min
+  availability in Table <a href="#tab:step1-species-2">6.8</a> (setting
+  `pif_scale_duration` in P4: **TRUE**; if FALSE, *T* is used unchanged
+  for every survey). Unlike NA-POPS availability, it does not change
+  with date or time since sunrise.
+- **The PIF pair adjustment is not used.** PIF multiplies densities by a
+  pair adjustment (1 to 2) to convert birds counted to individuals.
+  NA-POPS did not replace it, and both comparisons here set birds
+  counted against territories, so leaving it out means any difference
+  between the two count ratios comes only from the two corrections that
+  NA-POPS replaced. Species with a pair adjustment below 2 are, by PIF’s
+  own reckoning, counted as more than one bird per territory (both
+  sexes, or family groups), so their count ratios should run above 1
+  under either set of corrections.
+- **Hybrids.** To show which replacement matters, two hybrid corrections
+  swap one component at a time: PIF time of day with the NA-POPS EDR,
+  and NA-POPS availability with the PIF MDD.
+
+For one species, the PIF count ratio divided by the NA-POPS count ratio
+equals birds expected with NA-POPS divided by birds expected with PIF.
+Corrections that assume a survey samples more birds give a lower count
+ratio, and imply lower densities and smaller populations.
+
+| Corrections | Median | 10% | 90% | Species with more birds expected than with NA-POPS |
+|:---|---:|---:|---:|:---|
+| PIF | 3.97 | 2.89 | 5.70 | 100% |
+| PIF time of day + NA-POPS EDR | 1.21 | 0.90 | 1.63 | 81% |
+| NA-POPS availability + PIF MDD | 3.30 | 2.34 | 5.44 | 100% |
+
+<span id="tab:step3-pif-1"></span>Table 8.10: Comparable species: birds
+expected with the PIF and hybrid corrections, relative to birds expected
+with NA-POPS (ratio of totals over each species’ surveys). Above 1: the
+corrections assume the surveys sample more birds, so they give lower
+densities
+
+| Species | Corrections | Number of species | Median count ratio | Median fold difference (either direction) | Share within 2x | Share within 5x | Species with no birds counted |
+|:---|:---|----|---:|---:|---:|---:|---:|
+| Comparable | NA-POPS | 27 | 1.06 | 1.53 | 0.70 | 1.00 | 0 |
+| Comparable | PIF | 27 | 0.23 | 4.40 | 0.19 | 0.63 | 0 |
+| Comparable | PIF time of day + NA-POPS EDR | 27 | 0.88 | 1.56 | 0.67 | 0.96 | 0 |
+| Comparable | NA-POPS availability + PIF MDD | 27 | 0.29 | 3.39 | 0.30 | 0.67 | 0 |
+| All species | NA-POPS | 34 | 1.14 | 1.67 | 0.71 | 0.94 | 0 |
+| All species | PIF | 34 | 0.22 | 4.45 | 0.15 | 0.59 | 0 |
+| All species | PIF time of day + NA-POPS EDR | 34 | 0.88 | 1.58 | 0.65 | 0.91 | 0 |
+| All species | NA-POPS availability + PIF MDD | 34 | 0.28 | 3.52 | 0.29 | 0.71 | 0 |
+
+<span id="tab:step3-pif-2"></span>Table 8.11: Count ratio (birds counted
+/ birds expected) with NA-POPS, PIF and hybrid corrections, for the
+species with PIF values (same surveys and grids for every set)
+
+| species | Birds counted | Expected, NA-POPS | Expected, PIF | Count ratio, NA-POPS | Count ratio, PIF (95% sampling interval) | Closer to 1 | PIF time of day | PIF MDD (m) | NA-POPS EDR (m) | PIF pair adjustment |
+|:---|---:|---:|---:|---:|:---|:---|---:|---:|---:|---:|
+| AMRE | 5 | 18.9 | 70.2 | 0.27 | 0.07 (0.02-0.17) | NA-POPS | 0.92 | 100 | 60 | 2.00 |
+| NOFL | 12 | 27.9 | 119.3 | 0.43 | 0.10 (0.02-0.27) | NA-POPS | 0.77 | 200 | 125 | 1.25 |
+| RBGR | 105 | 243.2 | 1209.8 | 0.43 | 0.09 (0.01-0.18) | NA-POPS | 0.86 | 200 | 97 | 2.00 |
+| BLJA | 76 | 163.2 | 669.4 | 0.47 | 0.11 (0.08-0.43) | NA-POPS | 0.82 | 200 | 110 | 1.25 |
+| EAKI | 12 | 21.5 | 70.3 | 0.56 | 0.17 (0.09-0.30) | NA-POPS | 0.87 | 125 | 88 | 1.75 |
+| HOWR | 54 | 77.7 | 201.8 | 0.70 | 0.27 (0.07-0.92) | NA-POPS | 0.85 | 125 | 81 | 2.00 |
+| SOSP | 33 | 45.9 | 174.6 | 0.72 | 0.19 (0.10-0.35) | NA-POPS | 0.69 | 125 | 68 | 2.00 |
+| BCCH | 35 | 47.5 | 151.9 | 0.74 | 0.23 (0.11-0.74) | NA-POPS | 0.68 | 125 | 75 | 2.00 |
+| SWTH | 58 | 76.8 | 385.8 | 0.75 | 0.15 (0.10-0.32) | NA-POPS | 0.60 | 200 | 85 | 2.00 |
+| AMRO | 93 | 107.1 | 422.4 | 0.87 | 0.22 (0.17-0.72) | NA-POPS | 0.44 | 200 | 95 | 2.00 |
+| BAOR | 25 | 27.7 | 109.9 | 0.90 | 0.23 (0.08-0.69) | NA-POPS | 0.87 | 125 | 86 | 1.75 |
+| YRWA | 27 | 27.4 | 121.8 | 0.99 | 0.22 (0.10-0.38) | NA-POPS | 0.77 | 125 | 65 | 2.00 |
+| EAWP | 168 | 169.8 | 1019.7 | 0.99 | 0.16 (0.04-0.21) | NA-POPS | 0.90 | 200 | 86 | 2.00 |
+| WOTH | 115 | 108.3 | 538.0 | 1.06 | 0.21 (0.07-0.26) | NA-POPS | 0.43 | 200 | 84 | 2.00 |
+| GCFL | 95 | 84.1 | 625.2 | 1.13 | 0.15 (0.02-0.19) | NA-POPS | 0.80 | 200 | 83 | 1.75 |
+| VEER | 96 | 80.2 | 323.2 | 1.20 | 0.30 (0.00-0.36) | NA-POPS | 0.62 | 200 | 102 | 2.00 |
+| DOWO | 8 | 5.5 | 46.2 | 1.45 | 0.17 (0.05-0.34) | NA-POPS | 0.74 | 125 | 59 | 2.00 |
+| COYE | 67 | 44.5 | 139.5 | 1.51 | 0.48 (0.19-0.61) | NA-POPS | 0.90 | 125 | 82 | 2.00 |
+| DEJU | 36 | 23.5 | 93.1 | 1.53 | 0.39 (0.24-0.61) | NA-POPS | 0.58 | 125 | 63 | 2.00 |
+| OVEN | 231 | 139.0 | 763.5 | 1.66 | 0.30 (0.07-0.94) | NA-POPS | 0.81 | 200 | 91 | 2.00 |
+| HAWO | 39 | 22.5 | 87.0 | 1.73 | 0.45 (0.00-0.61) | NA-POPS | 0.78 | 125 | 73 | 2.00 |
+| CHSP | 77 | 42.0 | 108.1 | 1.83 | 0.71 (0.28-1.32) | PIF | 0.50 | 125 | 73 | 2.00 |
+| BTNW | 34 | 18.3 | 75.8 | 1.86 | 0.45 (0.00-0.63) | NA-POPS | 0.88 | 125 | 71 | 2.00 |
+| REVI | 335 | 161.0 | 443.1 | 2.08 | 0.76 (0.23-0.98) | PIF | 0.78 | 125 | 77 | 2.00 |
+| YEWA | 47 | 20.4 | 77.1 | 2.30 | 0.61 (0.29-0.92) | PIF | 0.90 | 125 | 73 | 2.00 |
+| WBNU | 36 | 10.6 | 47.3 | 3.40 | 0.76 (0.21-1.05) | PIF | 0.74 | 125 | 66 | 1.50 |
+| NAWA | 74 | 19.7 | 58.9 | 3.76 | 1.26 (0.26-3.43) | PIF | 0.81 | 125 | 81 | 2.00 |
+
+<span id="tab:step3-pif-3"></span>Table 8.12: Comparable species: birds
+expected and count ratios with NA-POPS and PIF corrections, which is
+closer to agreement (1), and the corrections themselves (PIF time of day
+is for a 3-min BBS stop)
+
+<div class="figure">
+
+<img src="README_files/figure-gfm/step3-pif-plot-1.png" alt="Count ratio with NA-POPS and PIF corrections, comparable species with birds counted, sorted by the NA-POPS ratio. Each line joins one species' two ratios."  />
+<p class="caption">
+
+<span id="fig:step3-pif-plot"></span>Figure 8.9: Count ratio with
+NA-POPS and PIF corrections, comparable species with birds counted,
+sorted by the NA-POPS ratio. Each line joins one species’ two ratios.
+</p>
+
+</div>
+
+<div class="figure">
+
+<img src="README_files/figure-gfm/step3-pif-totals-1.png" alt="Birds counted vs birds expected with NA-POPS (left) and PIF (right) corrections, by species (totals over each species' surveys at its CBBC-positive grids; species with PIF values). Counts are the same in both panels; only the birds expected change."  />
+<p class="caption">
+
+<span id="fig:step3-pif-totals"></span>Figure 8.10: Birds counted vs
+birds expected with NA-POPS (left) and PIF (right) corrections, by
+species (totals over each species’ surveys at its CBBC-positive grids;
+species with PIF values). Counts are the same in both panels; only the
+birds expected change.
+</p>
+
+</div>
+
+| corrections | n_species | pearson_log | spearman |
+|:------------|----------:|------------:|---------:|
+| NA-POPS     |        27 |        0.51 |     0.41 |
+| PIF         |        27 |        0.48 |     0.41 |
+
+<span id="tab:step3-pif-4"></span>Table 8.13: Comparable species:
+correlation across species of CBBC density with corrected point-count
+density, NA-POPS vs PIF corrections
+
+| measure     |   lcl |  ucl |
+|:------------|------:|-----:|
+| pearson_log | -0.14 | 0.10 |
+| spearman    | -0.16 | 0.15 |
+
+<span id="tab:step3-pif-5"></span>Table 8.14: Comparable species: 95%
+bootstrap CI for the change in correlation with CBBC, PIF minus NA-POPS
+
+34 of the 34 species compared have PIF values. For comparable species,
+PIF corrections expect a median of **3.97 times** as many birds as
+NA-POPS (Table <a href="#tab:step3-pif-1">8.10</a>). The median count
+ratio is **0.23** with PIF corrections and **1.06** with NA-POPS, with
+19% and 70% of species within 2× of agreement, respectively (Table
+<a href="#tab:step3-pif-2">8.11</a>). PIF brings **5 of 27** comparable
+species closer to agreement (19%; exact 95% interval 6%-38%).
+
+**How to read:**
+
+- **Which way PIF moves the ratios.** In Table
+  <a href="#tab:step3-pif-1">8.10</a>, values above 1 mean PIF assumes
+  the surveys sample more birds than NA-POPS does, which lowers the
+  count ratio (and, in a population estimate, the population). In Figure
+  <a href="#fig:step3-pif-totals">8.10</a>, this moves every species to
+  the right of its NA-POPS position by that factor: a factor shared by
+  all species shifts the cloud of points off the 1:1 line without
+  changing its scatter. The two hybrid rows split the difference into
+  its two parts: time of day instead of availability, and MDD instead of
+  EDR. Effective area grows with the square of the detection radius, so
+  MDD vs EDR usually dominates for unlimited-distance counts, where it
+  changes the area by (MDD / EDR)². For counts truncated at 50 or 100 m,
+  both areas approach the truncation circle (π *r*²) when the radius is
+  well beyond the limit, so the distance part shrinks.
+- **Closer to 1 is not automatically better.** As Section
+  <a href="#absolute-logic">8.2</a> explains, the count ratio would sit
+  below 1 even with perfect corrections if populations had declined
+  since the census, and because only CBBC-positive grids are used; and
+  above 1 where pairs, fledglings and non-territorial birds are counted.
+  A correction that moves ratios toward 1 is better only if those
+  effects are small. In particular, if NA-POPS ratios already run above
+  1, PIF corrections can look better partly by offsetting the counting
+  of individuals against territories, rather than by being better
+  detectability corrections.
+- **Systematic shift vs species-level agreement.** PIF and NA-POPS can
+  differ in level (median count ratio) and in how they treat species
+  relative to each other. Tables <a href="#tab:step3-pif-4">8.13</a> and
+  <a href="#tab:step3-pif-5">8.14</a> test the second: whether PIF’s
+  species-specific values rank species’ densities more like CBBC. PIF
+  MDD comes in a few classes (50 to 400 m), so species in the same class
+  get the same distance correction, and the classes span a wider range
+  than NA-POPS EDRs.
+- **Hybrids.** If a hybrid agrees better than both full sets (Table
+  <a href="#tab:step3-pif-2">8.11</a>), one component of each set is
+  closer to the census than the other: for example, NA-POPS availability
+  with PIF MDD agreeing best would point to EDR, not availability, as
+  the source of any NA-POPS inflation.
+- **Uncertainty.** As elsewhere, the intervals are sampling intervals
+  that take the corrections as given. The PIF corrections carry no
+  uncertainty here, and the time-of-day value refers to BBS timing
+  rather than each BAM survey’s own date and time.
+
 # 9 Step 4: Synthesis
 
 | Step | Comparison | Metric | Value |
 |:---|:---|:---|:---|
 | 1 | CBBC vs BAM uncorrected (composition, all species, all matched sites) | Spearman, species shares | 0.55 |
 | 3 | CBBC vs BAM corrected (composition, all species) | Spearman, species means | 0.44 |
-| 3 | Count ratio: birds counted / birds expected (territorial) | Median ratio | 1.03 |
-| 3 | Count ratio: birds counted / birds expected (territorial) | Median fold difference (either direction) | 1.60 |
-| 3 | Count ratio: birds counted / birds expected (territorial) | Share within 2x | 68% |
-| 3 | Plot-averaged density ratio (territorial) | Median ratio | 1.03 |
-| 3 | Plot-averaged density ratio (territorial) | Share within 2x / 10x | 75% / 100% |
-| 3 | Detection-rate check (territorial) | Observed / expected, median | 1.10 |
+| 3 | Count ratio: birds counted / birds expected (comparable) | Median ratio | 1.06 |
+| 3 | Count ratio: birds counted / birds expected (comparable) | Median fold difference (either direction) | 1.53 |
+| 3 | Count ratio: birds counted / birds expected (comparable) | Share within 2x | 70% |
+| 3 | Plot-averaged density ratio (comparable) | Median ratio | 1.04 |
+| 3 | Plot-averaged density ratio (comparable) | Share within 2x / 10x | 74% / 100% |
+| 3 | Detection-rate check (comparable) | Observed / expected, median | 1.11 |
+| 3 | Count ratio with PIF corrections (comparable, species with PIF values) | Median ratio | 0.23 |
+| 3 | Count ratio with PIF corrections (comparable, species with PIF values) | Median fold difference (either direction) | 4.40 |
+| 3 | Count ratio with PIF corrections (comparable, species with PIF values) | Share within 2x | 19% |
+| 3 | PIF vs NA-POPS count ratio (comparable) | Share of species closer to 1 with PIF | 19% |
 
 <span id="tab:step4-1"></span>Table 9.1: Key results across steps
 (comparisons at CBBC-positive grids, except the step 1 composition
@@ -1248,26 +1544,26 @@ insensitive to how many birds were recorded per detection.
 
 # 10 Settings used
 
-    ## List of 3
+    ## List of 4
     ##  $ P1:List of 18
-    ##   ..$ coord_max_disagree_m : num 1000
-    ##   ..$ require_seconds      : logi FALSE
-    ##   ..$ list_completeness_min: num 0.8
-    ##   ..$ min_visits           : num 6
-    ##   ..$ min_plot_ha          : num 10
-    ##   ..$ max_plot_ha          : num 100
-    ##   ..$ min_census_year      : num 1975
-    ##   ..$ successional_pattern : chr "^(44|434|[12]\\d[34]|315[34])"
-    ##   ..$ exclude_successional : logi TRUE
-    ##   ..$ exclude_urban        : logi TRUE
-    ##   ..$ cbbc_density         : chr "PLOTDENS / PLOTSIZE x 100; DENSKM2 = 0.1 as '+'; else DENSKM2"
-    ##   ..$ cbbc_recode          : Named chr [1:14] "YRWA" "YRWA" "CAJA" "CAJA" "NOFL" "NOFL" "DEJU" "DEJU" "YEWA" "BTNW" ...
-    ##   ..$ bam_recode           : Named chr [1:2] "HOWR" "PSFL"
-    ##   ..$ split_taxa           : Named num [1:3] -101 -114 56
-    ##   ..$ traill_code          : chr "TRFL"
-    ##   ..$ traill_species       : chr [1:2] "ALFL" "WIFL"
-    ##   ..$ exclude_species      : chr [1:23] "BHCO" "COGR" "EUST" "HOSP" "ROPI" "RWBL" "BRBL" "YHBL" "CEDW" "AMGO" ...
-    ##   ..$ created              : POSIXct[1:1], format: "2026-11-06 15:01:27"
+    ##   ..$ coord_max_disagree_m  : num 1000
+    ##   ..$ require_seconds       : logi FALSE
+    ##   ..$ list_completeness_min : num 0.8
+    ##   ..$ min_visits            : num 6
+    ##   ..$ min_plot_ha           : num 10
+    ##   ..$ max_plot_ha           : num 100
+    ##   ..$ min_census_year       : num 1975
+    ##   ..$ successional_pattern  : chr "^(44|434|[12]\\d[34]|315[34])"
+    ##   ..$ exclude_successional  : logi TRUE
+    ##   ..$ exclude_urban         : logi TRUE
+    ##   ..$ cbbc_density          : chr "PLOTDENS / PLOTSIZE x 100; DENSKM2 = 0.1 as '+'; else DENSKM2"
+    ##   ..$ cbbc_recode           : Named chr [1:14] "YRWA" "YRWA" "CAJA" "CAJA" "NOFL" "NOFL" "DEJU" "DEJU" "YEWA" "BTNW" ...
+    ##   ..$ bam_recode            : Named chr [1:2] "HOWR" "PSFL"
+    ##   ..$ split_taxa            : Named num [1:3] -101 -114 56
+    ##   ..$ traill_code           : chr "TRFL"
+    ##   ..$ traill_species        : chr [1:2] "ALFL" "WIFL"
+    ##   ..$ non_comparable_species: chr [1:24] "BHCO" "COGR" "EUST" "HOSP" "ROPI" "RWBL" "BRBL" "YHBL" "CEDW" "AMGO" ...
+    ##   ..$ created               : POSIXct[1:1], format: "2026-11-09 11:57:12"
     ##  $ P2:List of 9
     ##   ..$ bam_db         : chr "03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09.duckdb"
     ##   ..$ visit_filter   : chr "NOT flag_any AND NOT flag_dup"
@@ -1277,7 +1573,7 @@ insensitive to how many birds were recorded per detection.
     ##   ..$ doy_range      : num [1:2] 145 196
     ##   ..$ tssr_range     : num [1:2] -1 6
     ##   ..$ distance_method: chr "haversine, R = 6371008.8 m"
-    ##   ..$ created        : POSIXct[1:1], format: "2026-11-06 15:02:07"
+    ##   ..$ created        : POSIXct[1:1], format: "2026-11-09 11:57:23"
     ##  $ P3:List of 8
     ##   ..$ min_sites_cbbc  : num 10
     ##   ..$ avail_model     : chr "best"
@@ -1286,7 +1582,15 @@ insensitive to how many birds were recorded per detection.
     ##   ..$ edr_samples     : num 1000
     ##   ..$ napops_version  : chr "1.1.2"
     ##   ..$ napops_data_date: chr "2024-03-05"
-    ##   ..$ created         : POSIXct[1:1], format: "2026-11-06 15:02:58"
+    ##   ..$ created         : POSIXct[1:1], format: "2026-11-09 11:57:55"
+    ##  $ P4:List of 7
+    ##   ..$ pif_table           : chr "Population_estimates_workflow_support.xlsx"
+    ##   ..$ pif_ref_duration_min: num 3
+    ##   ..$ pif_scale_duration  : logi TRUE
+    ##   ..$ pif_name_fix        : Named chr [1:3] "Northern House Wren" "Western Flycatcher" "Canada Jay"
+    ##   ..$ pif_pair_used       : logi FALSE
+    ##   ..$ pif_area            : chr "p_pif x pi x MDD^2 x (1 - exp(-(distance limit / MDD)^2)): MDD as EDR"
+    ##   ..$ created             : POSIXct[1:1], format: "2026-11-09 11:58:00"
 
     ## R version 4.5.2 (2025-10-31 ucrt)
     ## Platform: x86_64-w64-mingw32/x64
