@@ -1,10 +1,10 @@
 # ==============================================================================
 # P1_prepare_cbbc.R
 #
-# PREPARATION STEP 1 OF 4 (no inferences; run once, output cached)
+# PREPARATION STEP 1 OF 5 (no inferences; run once, output cached)
 #
 # Builds the Canadian Breeding Bird Census (CBBC) data used throughout the
-# comparison report (cbbc_bam_comparison.Rmd):
+# comparison report (README.Rmd):
 #   1. Reads the PLOTS and SPECIES tables.
 #   2. Parses plot coordinates (DD.MM.SS text) and checks them against GRIDREF.
 #   3. Applies census-quality filters to each census record.
@@ -12,7 +12,7 @@
 #   5. Builds one row per retained site (coordinates, habitat, plot size, effort).
 #
 # All species-code rules used by the later scripts and the report (CBBC and BAM
-# recodes, split taxa, Traill's Flycatcher, non-territorial species) are defined
+# recodes, split taxa, Traill's Flycatcher, non-comparable species) are defined
 # HERE and stored in the output settings, so every step treats species the same.
 #
 # Background (CBBC database documentation; Kennedy et al. 1999, CWS Technical
@@ -145,16 +145,18 @@ VIREO_SPLIT_LAT  <- 56             #   VIREO_SPLIT_LAT = CAVI, otherwise BHVI
 TRAILL_CODE    <- "TRFL"
 TRAILL_SPECIES <- c("ALFL", "WIFL")
 
-# Species spot-mapping cannot census as territories: kept in outputs but
-# flagged (territorial = FALSE) and summarized separately in the report
-EXCLUDE_SPECIES <- c(
+# Species whose spot-mapped territories are a poor proxy for birds on a point
+# count: kept in outputs but flagged (comparable = FALSE) and summarized
+# separately in the report
+NON_COMPARABLE_SPECIES <- c(
   "BHCO",                                          # brood parasite: holds no nesting territory
   "COGR", "EUST", "HOSP", "ROPI",                  # colonial / semi-colonial nesters
   "RWBL", "BRBL", "YHBL",                          # polygynous or colonial blackbirds
   "CEDW", "AMGO", "PISI", "EVGR", "RECR", "WWCR",  # flocking, weakly territorial or nomadic
   "BARS", "CLSW", "TRES", "NRWS", "BANS", "PUMA",  # swallows / martins: aerial foragers,
   "CHSW",                                          #   often colonial; counted in flight
-  "AMCR", "CORA"                                   # territories far larger than census plots
+  "AMCR", "CORA",                                  # territories far larger than census plots
+  "RUGR"                                           # males drum mostly in spring, before the point-count season: dawn counts miss them
 )
 
 # ------------------------------------------------------------------------------
@@ -313,7 +315,7 @@ cbbc_long <- species_tbl |>
   ) |>
   group_by(RECNO, SITEID, YEAR, species) |>          # sum forms recoded to the same species
   summarise(dens_km2 = sum(dens_km2), .groups = "drop") |>
-  mutate(territorial = !species %in% EXCLUDE_SPECIES)
+  mutate(comparable = !species %in% NON_COMPARABLE_SPECIES)
 
 traill_records <- species_tbl |>
   filter(CODE == TRAILL_CODE, RECNO %in% records$RECNO) |>
@@ -374,7 +376,7 @@ attr(out, "settings") <- list(
   split_taxa            = c(towhee_lon = TOWHEE_SPLIT_LON, vireo_lon = VIREO_SPLIT_LON, vireo_lat = VIREO_SPLIT_LAT),
   traill_code           = TRAILL_CODE,
   traill_species        = TRAILL_SPECIES,
-  exclude_species       = EXCLUDE_SPECIES,
+  non_comparable_species = NON_COMPARABLE_SPECIES,
   created               = Sys.time()
 )
 
