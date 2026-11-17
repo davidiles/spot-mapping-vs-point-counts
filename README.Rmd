@@ -374,7 +374,22 @@ pct <- function(x) paste0(round(100 * x), "%")
 
 ```{r build-tables, include = FALSE, calc = TRUE}
 # ---- Sites ----
+# P2 has excluded entire shared-coordinate CBBC groups and assigned each BAM
+# survey to its nearest remaining site. These final sites define BOTH species
+# selection (P3) and all report calculations.
+if (!isTRUE(s2$exclude_shared_coordinates) ||
+    !isTRUE(s2$assign_nearest_before_species_selection)) {
+  stop("Cached preparation outputs use old matching rules: rerun P1-P4.")
+}
+if (!is.numeric(s3$min_sites_cbbc) || length(s3$min_sites_cbbc) != 1L ||
+    is.na(s3$min_sites_cbbc) || s3$min_sites_cbbc < 1 ||
+    s3$min_sites_cbbc != as.integer(s3$min_sites_cbbc)) {
+  stop("P3 cached output has no valid min_sites_cbbc setting: rerun P3-P4.")
+}
 matched_sites <- unique(p2$site_survey$SITEID)
+if (any(matched_sites %in% p1$cbbc_sites$SITEID[p1$cbbc_sites$shared_coords])) {
+  stop("Shared-coordinate site appeared in the final matched-site set.")
+}
 
 sites_info <- p1$cbbc_sites |>
   mutate(matched = SITEID %in% matched_sites)
@@ -387,20 +402,18 @@ cands          <- p3$species_candidates
 spp_candidates <- cands |> filter(in_napops) |> pull(species)
 
 # ---- Survey assignment (every comparison) ----
-# Each retained survey is assigned to its nearest CBBC plot, so a survey within
-# 1 km of two plots is used once, never twice, and every comparison uses the
-# same surveys at each plot. site_year identifies repeat surveys of one point
-# location in one season.
-survey_nearest <- p2$site_survey |>
-  group_by(survey_id) |>
-  slice_min(order_by = dist_m, n = 1, with_ties = FALSE) |>
-  ungroup()
-
+# P2 already excluded shared-coordinate groups AND assigned each survey once;
+# re-assignment here would create inconsistency with P3 species selection.
+survey_nearest <- p2$site_survey
+stopifnot(!anyDuplicated(survey_nearest$survey_id))
 survey_grid <- survey_nearest |>
   transmute(SITEID, survey_id, year, site_year = paste(location_id, year, sep = "_"))
 
-n_surveys_multi_site <- p2$site_survey |> count(survey_id) |> filter(n > 1) |> nrow()
-n_sites_assigned     <- n_distinct(survey_grid$SITEID)
+n_sites_assigned <- n_distinct(survey_grid$SITEID)
+exclusion_audit <- p2$exclusion_audit
+n_shared_sites_excluded <- exclusion_audit$excluded_cbbc_sites_with_surveys
+n_shared_groups_excluded <- exclusion_audit$excluded_coordinate_groups_with_surveys
+n_surveys_lost_shared <- exclusion_audit$surveys_without_unambiguous_site
 
 # ---- Matched site x species table (steps 1 and 3) ----
 # BAM: count per survey (uncorrected) and NA-POPS-corrected density (ratio
@@ -442,8 +455,9 @@ survey_data <- survey_grid |>
              by = c("SITEID", "species"))
 
 # ---- Species compared ----
-# Every candidate from P3 (CBBC territories at >= the P3 minimum number of
-# matched sites) that has NA-POPS removal and distance models. No other
+# Every candidate from P3 (CBBC territories at >= s3$min_sites_cbbc of the FINAL sites,
+# after the coordinate exclusion and nearest-site assignment in P2) that
+# has NA-POPS removal and distance models. No other
 # criterion is applied. Availability, EDR and the BAM count expected under
 # agreement are computed for reference only.
 
@@ -551,7 +565,10 @@ year_gap <- survey_nearest |>
   mutate(gap = bam_year - year_mean)
 
 # ---- Site map ----
+# Display only sites eligible for matching; ambiguous-coordinate groups were
+# excluded, not merely left unmatched.
 sites_sf <- sites_info |>
+  filter(!shared_coords) |>
   mutate(status = if_else(condition = matched, true = "Matched (BAM surveys within 1 km)", false = "Not matched")) |>
   st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
   st_transform(crs = MAP_CRS)
@@ -921,6 +938,8 @@ The same check is repeated with the older **Partners in Flight (PIF)** correctio
 
 ## Key findings
 
+All results below use only the **`r n_matched` final CBBC locations** after excluding every historical plot in a group of identical recorded coordinates. Species must occur in **at least `r s3$min_sites_cbbc` of these locations**. All numerical results below are computed for this restricted sample.
+
 - **NA-POPS-corrected point counts vs spot mapping.** For the `r comp_density_ratio$n_species` comparable species, NA-POPS-corrected point-count density is a median of **`r round(comp_density_ratio$median_ratio, 2)` times** the CBBC territory density (plot-averaged density ratio). Individual species are typically `r round(comp_density_ratio$median_abs_fold, 2)`-fold from agreement in either direction; `r pct(comp_density_ratio$within_2x)` are within 2× and `r pct(comp_density_ratio$within_10x)` within 10× (Section \@ref(plot-averaged)).
 - **PIF vs NA-POPS.** The older PIF corrections assume each survey samples a median of `r round(pif_rel_median, 2)` times as many birds as NA-POPS does, so they give lower densities. With PIF the median density ratio is **`r round(pif_comp_pif$median_ratio, 2)`**, against **`r round(pif_comp_napops$median_ratio, 2)`** with NA-POPS, so on the median `r closer_overall` is closer to agreement. PIF is closer for `r n_closer_pif` of `r nrow(closer_comp)` comparable species (Section \@ref(pif-vs-napops)).
 - **Composition.** Before any correction, CBBC and BAM relative abundances have a Spearman correlation of `r round(cor_1e$spearman[1], 2)` across species. Uncorrected and NA-POPS-corrected abundance have a Spearman correlation of `r round(rho_rerank, 2)` across species, which measures how much the corrections re-rank species (Section \@ref(composition)).
@@ -1081,20 +1100,20 @@ pif_density_ratio |>
 
 ## Data and matching {#methods-data}
 
-**Point counts.** Human point counts from the BAM database (no ARU recordings, no eBird checklists), within `r s2$match_radius_m / 1000` km of each retained CBBC plot, in the breeding season and in the morning (filters in `P2_match_bam_surveys.R`; Table \@ref(tab:step1a-2)). Each survey is assigned to its nearest plot, so no survey is used twice. **`r n_matched` CBBC sites** have at least one retained survey.
+**Point counts.** Human point counts from the BAM database (no ARU recordings, no eBird checklists), within `r s2$match_radius_m / 1000` km of retained CBBC plots, in the breeding season and in the morning (filters in `P2_match_bam_surveys.R`; Table \@ref(tab:step1a-2)). All plots in coordinate groups containing multiple distinct CBBC SITEIDs were excluded before assignment, because their identical recorded positions cannot identify which historical plot nearby surveys represent. Among the initially survey-matched plots, this excluded **`r n_shared_sites_excluded` plots in `r n_shared_groups_excluded` coordinate groups**; **`r n_matched` uniquely located CBBC sites** remain. Each retained BAM survey is assigned once to its nearest eligible plot *in P2*, before species selection.
 
 **Why spot mapping.** CBBC observers visited each plot repeatedly (at least the minimum number of visits set in P1; Table \@ref(tab:step1a-1)) and mapped territories, so CBBC densities are territories per unit area, including fractions of territories crossing the plot edge, with no detectability correction involved. For territorial songbirds detected mainly by song, this is approximately the quantity a corrected point count estimates. The two are not identical: point counts record individuals (which may include non-territorial individuals), whereas spot mapping records territories. Spot mapping also misses some territories, so CBBC is treated as an independent reference rather than the truth.
 
-**Sites compared.** Every comparison uses all matched CBBC grids for every species, including grids where spot mapping found no territories of that species (CBBC density 0). Two things argue for this:
+**Sites compared.** Every comparison uses the final matched, coordinate-unambiguous CBBC sites for every species, including sites where spot mapping found no territories of that species (CBBC density 0). The species occurrence threshold is also evaluated on exactly these final sites. Two things argue for including sites with CBBC zeros:
 
 - **No selection on the outcome.** Keeping only grids where spot mapping found a species selects grids where its CBBC density was high partly by chance, and biases CBBC densities upward relative to the point counts.
-- **Turnover since the census.** Over the decades between the censuses and the point counts, species were lost from some plots and gained at others. Keeping only grids where the species held territories at the census keeps the losses but discards the gains, which biases point-count densities downward. Using all grids keeps both, so only net population change remains.
+- **Turnover since the census.** Over the decades between the censuses and the point counts, species were lost from some plots and gained at others. Keeping only grids where the species held territories at the census keeps the losses but discards the gains, which biases point-count densities downward. Including all retained sites allows both apparent losses and gains to contribute, although spatially heterogeneous change, imperfect census coverage and habitat differences remain.
 
 The cost is habitat mismatch: points within 1 km of a plot can sample habitat the plot does not represent (for example, edges or young forest around a mature-forest plot), so a species can be counted near a plot where spot mapping found none.
 
 ## Species compared {#species-compared}
 
-**Scope.** Species are selected on one criterion: CBBC territories at 10 or more matched sites (set in P3), plus an NA-POPS model, without which counts cannot be corrected. Nothing about BAM detections, availability or EDR is used, so no species is included or excluded because of how well BAM and CBBC agree. Results are summarised for all species and for **comparable** species separately. A species was considered **non-comparable** if spot-mapped territories are likely to be a poor proxy for one bird on a point count: e.g., non-territorial, flocking, or species whose territories are far larger than the plots). The list is tentative and subjective, and set in script P1 (`non_comparable_species` in Section \@ref(settings-used).
+**Scope.** Species are selected if CBBC territories were recorded at **`r s3$min_sites_cbbc` or more of the `r n_matched` final, uniquely located sites** (set in P3), and an NA-POPS model is available, without which counts cannot be corrected. Nothing about BAM detections, availability or EDR is used, so no species is included or excluded because of how well BAM and CBBC agree. Results are summarised for all species and for **comparable** species separately. A species was considered **non-comparable** if spot-mapped territories are likely to be a poor proxy for one bird on a point count: e.g., non-territorial, flocking, or species whose territories are far larger than the plots). The list is tentative and subjective, and set in script P1 (`non_comparable_species` in Section \@ref(settings-used).
 
 `r length(spp_primary)` of `r nrow(species_selection)` candidate species have NA-POPS models and are compared (`r sum(species_selection$primary & species_selection$comparable)` comparable, `r sum(species_selection$primary & !species_selection$comparable)` non-comparable). `r sum(species_selection$primary & !species_selection$detected_nearby)` of them were never detected by a matched BAM survey. The species are listed in Table \@ref(tab:step1-species-2).
 
@@ -1352,14 +1371,14 @@ How much matched data there is, how well replicated, from when and where. Every 
 
 ## Sample sizes
 
-**What this tests:** how many CBBC census records survive the quality filters, and how many of the retained sites have BAM point counts close enough to compare. Each filter is listed separately, so it is clear why records were dropped and which filter costs the most data.
+**What this tests:** how many CBBC census records survive the original quality filters, and how many retained sites remain eligible after the separate shared-coordinate exclusion and BAM survey filters. P1 retains the full census-quality audit; P2 records the coordinate exclusion as an additional survey-matching stage. These exclusions are based on distinct CBBC SITEIDs having identical site coordinates, not on all coordinates rounded to minutes or on whether a bird was detected.
 
 ```{r data-samples}
 kable(cbbc_filters, col.names = c("CBBC filter", "Records failing"),
       caption = sprintf("CBBC census records failing each filter (of %d; a record can fail several)", n_records), label = "step1a-1")
 
-kable(p2$survey_funnel, col.names = c("BAM survey filter (cumulative)", "CBBC sites", "Surveys"),
-      caption = sprintf("CBBC sites with BAM surveys within %g km, and surveys, after each filter", s2$match_radius_m / 1000), label = "step1a-2")
+kable(p2$survey_funnel, col.names = c("BAM matching / exclusion stage (cumulative)", "CBBC sites", "Surveys"),
+      caption = sprintf("CBBC sites and BAM surveys within %g km after each filter, coordinate exclusion, and nearest-site assignment", s2$match_radius_m / 1000), label = "step1a-2")
 
 kable(radius_coverage, col.names = c("Within (m)", "CBBC sites with >= 1 retained survey"),
       caption = "CBBC sites with at least one retained BAM survey within each distance of the plot coordinate", label = "step1a-3")
@@ -1370,7 +1389,7 @@ list_completeness |>
         label = "step1a-4")
 ```
 
-`r n_records_ret` of `r n_records` census records (`r n_sites_ret` sites) pass the CBBC filters, and **`r n_matched` sites** have at least one retained BAM point count within `r s2$match_radius_m / 1000` km. `r n_surveys_multi_site` retained surveys lie within `r s2$match_radius_m / 1000` km of more than one plot; each survey is assigned to its nearest plot, so no survey is used twice, and `r n_sites_assigned` sites keep at least one assigned survey. That is the maximum sample for site-level comparisons. Species-level comparisons pool across these sites.
+`r n_records_ret` of `r n_records` census records (`r n_sites_ret` sites) pass the initial CBBC quality filters. The BAM matching then excludes every CBBC plot whose retained site coordinates are shared with another distinct SITEID. Among plots with eligible nearby surveys, **`r n_shared_sites_excluded` sites at `r n_shared_groups_excluded` identical-coordinate groups** are excluded. This removes `r n_surveys_lost_shared` distinct BAM surveys that have no match to a remaining eligible site. The resulting **`r n_matched` final CBBC sites** each have at least one assigned BAM survey within `r s2$match_radius_m / 1000` km; no survey is counted twice. All downstream species selection and comparisons use precisely this final site set, with a minimum species occurrence threshold of `r s3$min_sites_cbbc` sites. Spatial matching remains approximate even among uniquely recorded coordinate locations.
 
 ## Replication of BAM surveys
 
@@ -1426,7 +1445,7 @@ The median gap between a site's CBBC census year(s) and its BAM surveys is **`r 
 
 **What this tests:** where the matched sites are, which limits how far the conclusions generalize.
 
-```{r step1d, fig.cap = sprintf("Retained CBBC sites, by whether they have retained BAM point counts within %g km.", s2$match_radius_m / 1000), fig.height = 6}
+```{r step1d, fig.cap = sprintf("CBBC sites eligible after excluding shared-coordinate groups, by whether they have retained BAM point counts within %g km.", s2$match_radius_m / 1000), fig.height = 6}
 ggplot() +
   (if (!is.null(bcr)) geom_sf(data = bcr, fill = "grey96", colour = "grey70", linewidth = 0.2) else NULL) +
   geom_sf(data = sites_sf, mapping = aes(shape = status, colour = status), size = 1.6) +
@@ -1588,7 +1607,7 @@ None of the data are included in this repository. The scripts read them from loc
 
 | Source | What is used | Notes |
 |---|---|---|
-| **Canadian Breeding Bird Census (CBBC)** | `PLOTS` and `SPECIES` tables: plot location, size, habitat, census year and visits; territory counts per species | Database documented in Kennedy et al. (1999), CWS Technical Report 342. Held by Environment and Climate Change Canada (Canadian Wildlife Service). Census records are filtered for coordinate quality, list completeness, effort, plot size, year and habitat in `P1_prepare_cbbc.R`. |
+| **Canadian Breeding Bird Census (CBBC)** | `PLOTS` and `SPECIES` tables: plot location, size, habitat, census year and visits; territory counts per species | Database documented in Kennedy et al. (1999), CWS Technical Report 342. Held by Environment and Climate Change Canada (Canadian Wildlife Service). Census records are filtered for coordinate quality, list completeness, effort, plot size, year and habitat in `P1_prepare_cbbc.R`; sites sharing identical retained coordinates are excluded from BAM matching in `P2_match_bam_surveys.R`. |
 | **BAM point-count database (v5)** | Human point counts (no ARU recordings, no eBird checklists) within 1 km of each retained CBBC plot, with survey date, time, duration, distance limit and counts | DuckDB build `03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09`. Access through the BAM Project's data-sharing process. |
 | **NA-POPS** | Species availability (removal) and distance (EDR) models | Through the [`napops`](https://github.com/na-pops/napops) R package; the results release used is reported in Section \@ref(napops-corrections). The intercept-only distance model is used. |
 | **PIF corrections** | `Population_estimates_workflow_support.xlsx`: PIF time-of-day adjustment (`PIF_time_of_day`), maximum detection distance (`PIF_MDD`) and pair adjustment (`PIF_pair`) per species | Corrections used in PIF continental population estimates (Blancher et al. 2013; Stanton et al. 2019). Matched to NA-POPS species by common name in `P4_pif_corrections.R`, where MDD is used as an expert estimate of EDR. The pair adjustment is listed but not used (Section \@ref(pif-vs-napops)). |
@@ -1609,9 +1628,9 @@ The analysis has four preparation scripts, each run once with its output cached,
 
 | Step | Script | Prepares | Cached output (in `output/`) |
 |---|---|---|---|
-| 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules (recodes, split taxa, Traill's Flycatcher, species non-comparable between the methods) | `P1_cbbc_prepared.rds` |
-| 2 | `script/P2_match_bam_surveys.R` | BAM surveys within 1 km of each retained CBBC plot, survey filters, time since sunrise, counts | `P2_bam_matched.rds` |
-| 3 | `script/P3_napops_corrections.R` | Species compared, NA-POPS availability, EDR and effective area for every survey and species | `P3_napops_corrections.rds` |
+| 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules and flags for SITEIDs sharing recorded coordinates | `P1_cbbc_prepared.rds` |
+| 2 | `script/P2_match_bam_surveys.R` | BAM surveys within 1 km, survey filters, exclusion of entire shared-coordinate groups, unique nearest-site assignment, exclusion audit, and counts | `P2_bam_matched.rds` |
+| 3 | `script/P3_napops_corrections.R` | Species with CBBC territories at **`r s3$min_sites_cbbc` or more final sites**, NA-POPS availability, EDR and effective area for every survey and species | `P3_napops_corrections.rds` |
 | 4 | `script/P4_pif_corrections.R` | PIF time-of-day and maximum-detection-distance effective areas (and two hybrids) for the same surveys and species | `P4_pif_corrections.rds` |
 | 5 | `README.Rmd` | This report, knitted to `README.md` | figures in `README_files/` |
 
@@ -1622,8 +1641,8 @@ Each script and the report define their settings as constants at the top, and re
 1. Open the RStudio project (the `.Rproj` file in the repository root). All paths inside the project are built with `here::here()`, so they resolve from the project root, whichever folder a script is run from.
 2. Place the input data in `data/`, or set the data paths at the top of each preparation script (CBBC tables in P1, the BAM DuckDB file in P2, the PIF table in P4), and optionally the BCR file at the top of `README.Rmd`.
 3. Install the R packages used: `tidyverse`, `readxl`, `sf`, `DBI`, `duckdb`, `suncalc`, `lutz`, `napops`, `rappdirs`, `here`, `knitr` and `bookdown`.
-4. Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R`, `script/P3_napops_corrections.R` and `script/P4_pif_corrections.R`, in that order. Each writes its output to `output/`. Re-run them only when their inputs or settings change; each later script reads the earlier ones' outputs.
-5. Knit `README.Rmd` (in the repository root) with the Knit button. This writes `README.md` and its figures in `README_files/`; commit both so GitHub can display the report.
+4. Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R`, `script/P3_napops_corrections.R` and `script/P4_pif_corrections.R`, **in that order**. Each writes its output to `output/`. The new P2 excludes shared-coordinate groups and performs nearest-site assignment before P3 selects species at the configured minimum number of final sites (`r s3$min_sites_cbbc` in this report). **Re-run all four scripts after updating this workflow**; older cached `.rds` files are incompatible. Each later script reads the earlier outputs.
+5. Knit `README.Rmd` (in the repository root) with the Knit button. This writes both `README.html` and `README.md` (and Markdown figures in `README_files/`); commit the `.md` and figure folder so GitHub can display the regenerated results. All numerical summaries, tables, confidence intervals and figures are recomputed from the revised caches.
 
 Because the data are not public, `README.md` shows the results of the author's local run.
 

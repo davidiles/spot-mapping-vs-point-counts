@@ -10,6 +10,8 @@
 #   3. Applies census-quality filters to each census record.
 #   4. Computes species densities (territories / km^2) with current species codes.
 #   5. Builds one row per retained site (coordinates, habitat, plot size, effort).
+#   6. Flags distinct SITEIDs sharing exactly the same site-level latitude/longitude.
+#      P2 excludes all members of such groups before selecting surveys.
 #
 # All species-code rules used by the later scripts and the report (CBBC and BAM
 # recodes, split taxa, Traill's Flycatcher, non-comparable species) are defined
@@ -349,7 +351,18 @@ cbbc_sites <- records |>
     longitude        = longitude[which.max(n_coord)],
     .groups          = "drop"
   ) |>
-  mutate(plot_radius_m = sqrt(plot_ha * 1e4 / pi))   # radius of a circle with the plot's area
+  mutate(plot_radius_m = sqrt(plot_ha * 1e4 / pi)) |>  # radius of a circle with the plot's area
+  add_count(latitude, longitude, name = "n_sites_at_coords") |>
+  mutate(shared_coords = n_sites_at_coords > 1)
+
+# Shared coordinates cannot resolve which distinct historic CBBC plot the BAM
+# observations represent. Flag the WHOLE coordinate group; selecting one of
+# the tied plots arbitrarily would make the reference territory density unstable.
+# This screen is applied after census-record QC and before point-count matching.
+cat("\nCBBC sites with shared coordinates (excluded from point-count matching in P2): ",
+    sum(cbbc_sites$shared_coords), " sites at ",
+    nrow(distinct(filter(cbbc_sites, shared_coords), latitude, longitude)),
+    " recorded coordinate locations\n", sep = "")
 
 cat("\nRetained sites by major habitat:\n")
 print(count(cbbc_sites, hab_major, sort = TRUE))
@@ -360,6 +373,7 @@ print(count(cbbc_sites, hab_major, sort = TRUE))
 
 out <- list(cbbc_qa = cbbc_qa, cbbc_long = cbbc_long, cbbc_sites = cbbc_sites, traill_records = traill_records)
 attr(out, "settings") <- list(
+  shared_coordinate_rule = "exclude all CBBC SITEIDs with identical retained site-level latitude and longitude (applied in P2)",
   coord_max_disagree_m  = COORD_MAX_DISAGREE_M,
   require_seconds       = REQUIRE_SECONDS,
   list_completeness_min = LIST_COMPLETENESS_MIN,

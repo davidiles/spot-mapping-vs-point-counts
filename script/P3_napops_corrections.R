@@ -57,7 +57,7 @@ OUT_PATH <- file.path(OUT_DIR, "P3_napops_corrections.rds")
 # Constants
 # ------------------------------------------------------------------------------
 
-MIN_SITES_CBBC <- 10               # species needs CBBC territories at >= this many matched sites
+MIN_SITES_CBBC <- 10                # species needs territories at >= 5 FINAL retained, distinct CBBC locations
 
 AVAIL_MODEL    <- "best"           # removal model with lowest AIC (uses od and tssr)
 
@@ -95,7 +95,18 @@ if (is.null(non_comparable_species)) {
   stop("P1 settings have no non_comparable_species: re-run P1_prepare_cbbc.R first.")
 }
 
+# P2 has excluded whole shared-coordinate groups and assigned each BAM survey
+# once to its nearest remaining CBBC site. Selection is therefore based on
+# the exact retained spatial units used by all subsequent report calculations.
+if (!isTRUE(attr(p2, "settings")$exclude_shared_coordinates) ||
+    !isTRUE(attr(p2, "settings")$assign_nearest_before_species_selection)) {
+  stop("P2 cache predates coordinate exclusion/nearest assignment: re-run P2.")
+}
 matched_sites <- unique(p2$site_survey$SITEID)
+if (any(matched_sites %in% p1$cbbc_sites$SITEID[p1$cbbc_sites$shared_coords])) {
+  stop("P3 encountered an ambiguous CBBC site; re-run P1 and P2.")
+}
+cat("Final unambiguous CBBC sites used for species selection:", length(matched_sites), "\n")
 
 # NA-POPS results release in use (the package version does not identify it)
 napops_data_date <- readLines(con = file.path(rappdirs::app_dir(appname = "napops")$data(), "date.txt"), warn = FALSE)[1]
@@ -120,8 +131,11 @@ napops_ok    <- napops_table |>
 # the comparison because of its result. detected_nearby records whether any
 # matched survey detected it. Family (from NA-POPS) is used by the report to
 # define songbirds.
-# This selects SPECIES only. Every species is then compared over all matched
-# CBBC grids, including grids where spot mapping found no territories of it.
+# The occurrence threshold counts distinct CBBC SITEIDs AFTER shared-coordinate
+# exclusions and nearest-survey assignment in P2. These are the final sampled
+# locations (26 in the reference run), not the original 41 raw matched plots.
+# This selects SPECIES only. Every selected species is then compared over all
+# final CBBC grids, including grids where spot mapping found no territories.
 # (Traill's Flycatcher is a pre-split combination, not a species to compare)
 species_candidates <- p1$cbbc_long |>
   filter(SITEID %in% matched_sites, dens_km2 > 0, species != attr(x = p1, which = "settings")$traill_code) |>
