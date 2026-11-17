@@ -151,12 +151,12 @@ TRAILL_SPECIES <- c("ALFL", "WIFL")
 NON_COMPARABLE_SPECIES <- c(
   "BHCO",                                          # brood parasite: holds no nesting territory
   "COGR", "EUST", "HOSP", "ROPI",                  # colonial / semi-colonial nesters
-  "RWBL", "BRBL", "YHBL",                          # polygynous or colonial blackbirds
+  # "RWBL", "BRBL", "YHBL",                          # polygynous or colonial blackbirds
   "CEDW", "AMGO", "PISI", "EVGR", "RECR", "WWCR",  # flocking, weakly territorial or nomadic
   "BARS", "CLSW", "TRES", "NRWS", "BANS", "PUMA",  # swallows / martins: aerial foragers,
   "CHSW",                                          #   often colonial; counted in flight
-  "AMCR", "CORA",                                  # territories far larger than census plots
-  "RUGR"                                           # males drum mostly in spring, before the point-count season: dawn counts miss them
+  "AMCR", "CORA"                                  # territories far larger than census plots
+  #"RUGR"                                           # males drum mostly in spring, before the point-count season: dawn counts miss them
 )
 
 # ------------------------------------------------------------------------------

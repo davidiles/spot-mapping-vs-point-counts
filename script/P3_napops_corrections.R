@@ -120,6 +120,8 @@ napops_ok    <- napops_table |>
 # the comparison because of its result. detected_nearby records whether any
 # matched survey detected it. Family (from NA-POPS) is used by the report to
 # define songbirds.
+# This selects SPECIES only. Every species is then compared over all matched
+# CBBC grids, including grids where spot mapping found no territories of it.
 # (Traill's Flycatcher is a pre-split combination, not a species to compare)
 species_candidates <- p1$cbbc_long |>
   filter(SITEID %in% matched_sites, dens_km2 > 0, species != attr(x = p1, which = "settings")$traill_code) |>
