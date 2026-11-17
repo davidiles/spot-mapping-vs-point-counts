@@ -59,7 +59,7 @@ OUT_PATH <- file.path(OUT_DIR, "P2_bam_matched.rds")
 # Constants
 # ------------------------------------------------------------------------------
 
-MATCH_RADIUS_M   <- 5000           # see header
+MATCH_RADIUS_M   <- 2000           # see header
 VISIT_FILTER_SQL <- "NOT flag_any AND NOT flag_dup"   # BAM's own error / duplicate flags
 
 SENSORS    <- "PC"                 # human point counts
