@@ -127,13 +127,15 @@ this restricted sample.
 
 <div class="figure">
 
-<img src="README_files/figure-gfm/summary-figure-1.png" alt="Plot-averaged density ratio (NA-POPS- or PIF-corrected point-count density / CBBC territory density) by comparable species, sorted by the NA-POPS ratio. Each line joins one species' two ratios. A ratio of 1 means agreement."  />
+<img src="README_files/figure-gfm/summary-figure-1.png" alt="Plot-averaged density ratio (NA-POPS- or PIF-corrected point-count density / CBBC territory density) by comparable species, sorted by the NA-POPS ratio. Each line joins one species' two ratios. A ratio of 1 means agreement between point counts (corrected for detectability with either NA-POPS or PIF) and CBBC."  />
 <p class="caption">
 
 <span id="fig:summary-figure"></span>Figure 1.1: Plot-averaged density
 ratio (NA-POPS- or PIF-corrected point-count density / CBBC territory
 density) by comparable species, sorted by the NA-POPS ratio. Each line
-joins one species’ two ratios. A ratio of 1 means agreement.
+joins one species’ two ratios. A ratio of 1 means agreement between
+point counts (corrected for detectability with either NA-POPS or PIF)
+and CBBC.
 </p>
 
 </div>
