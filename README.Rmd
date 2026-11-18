@@ -399,6 +399,10 @@ sites_info <- p1$cbbc_sites |>
 # model, whether or not BAM detected them (P3). Narrowed to those with NA-POPS models
 # below, once the quantities used to select it have been computed.
 cands          <- p3$species_candidates
+if (anyNA(cands$comparable) ||
+    any(cands$comparable != !(cands$species %in% s1$non_comparable_species))) {
+  stop("P3 cached species classes disagree with P1; rerun P1, then P3 and P4 before knitting.")
+}
 spp_candidates <- cands |> filter(in_napops) |> pull(species)
 
 # ---- Survey assignment (every comparison) ----
@@ -569,7 +573,7 @@ year_gap <- survey_nearest |>
 # excluded, not merely left unmatched.
 sites_sf <- sites_info |>
   filter(!shared_coords) |>
-  mutate(status = if_else(condition = matched, true = "Matched (BAM surveys within 1 km)", false = "Not matched")) |>
+  mutate(status = if_else(condition = matched, true = sprintf("Matched (BAM surveys within %g km)", s2$match_radius_m / 1000), false = "Not matched")) |>
   st_as_sf(coords = c("longitude", "latitude"), crs = 4326) |>
   st_transform(crs = MAP_CRS)
 
@@ -934,6 +938,8 @@ This repository compares two ways of estimating breeding-bird density in Canada:
 
 If the NA-POPS corrections are about right, corrected point counts near CBBC plots should give densities of the same magnitude as the CBBC censuses. It is a plausibility check on the corrections, not a validation of them; the limitations are set out in Section \@ref(ratio-caveats).
 
+**Comparable versus non-comparable species.** The primary analysis focuses on species for which repeated spot mapping can plausibly delineate relatively stable breeding territories, and for which territory density provides a reasonably interpretable reference for NA-POPS-corrected point-count density. **Non-comparable** species are those whose breeding ecology may cause systematic differences between the quantities estimated by the two methods, even with accurate detectability corrections. Examples include birds that defend only nesting sites but forage widely, flocking or nomadic species, birds with ranges much larger than the mapped plots, and species whose territorial signals occur primarily outside the point-count season. These differences may introduce bias of uncertain direction, as well as greater variability in the relationship between point counts and mapped territories. The classification is based on breeding ecology, not on whether observed and expected counts agree. Non-comparable species remain in the data and exploratory all-species results, but are excluded from the primary comparable-species density and PIF comparisons. A brief justification for each flagged species is provided in Section \@ref(noncomparable-justifications).
+
 The same check is repeated with the older **Partners in Flight (PIF)** corrections that NA-POPS replaced in continental population estimates (a time-of-day adjustment instead of availability, and an expert-assigned detection distance instead of EDR), to see which set of corrections brings point counts closer to the CBBC censuses (Section \@ref(pif-vs-napops)).
 
 ## Key findings
@@ -1109,13 +1115,63 @@ pif_density_ratio |>
 - **No selection on the outcome.** Keeping only grids where spot mapping found a species selects grids where its CBBC density was high partly by chance, and biases CBBC densities upward relative to the point counts.
 - **Turnover since the census.** Over the decades between the censuses and the point counts, species were lost from some plots and gained at others. Keeping only grids where the species held territories at the census keeps the losses but discards the gains, which biases point-count densities downward. Including all retained sites allows both apparent losses and gains to contribute, although spatially heterogeneous change, imperfect census coverage and habitat differences remain.
 
-The cost is habitat mismatch: points within 1 km of a plot can sample habitat the plot does not represent (for example, edges or young forest around a mature-forest plot), so a species can be counted near a plot where spot mapping found none.
+The cost is habitat mismatch: points within `r s2$match_radius_m / 1000` km of a plot can sample habitat the plot does not represent (for example, edges or young forest around a mature-forest plot), so a species can be counted near a plot where spot mapping found none.
 
 ## Species compared {#species-compared}
 
-**Scope.** Species are selected if CBBC territories were recorded at **`r s3$min_sites_cbbc` or more of the `r n_matched` final, uniquely located sites** (set in P3), and an NA-POPS model is available, without which counts cannot be corrected. Nothing about BAM detections, availability or EDR is used, so no species is included or excluded because of how well BAM and CBBC agree. Results are summarised for all species and for **comparable** species separately. A species was considered **non-comparable** if spot-mapped territories are likely to be a poor proxy for one bird on a point count: e.g., non-territorial, flocking, or species whose territories are far larger than the plots). The list is tentative and subjective, and set in script P1 (`non_comparable_species` in Section \@ref(settings-used).
+**Scope.** Species are selected if CBBC territories were recorded at **`r s3$min_sites_cbbc` or more of the `r n_matched` final, uniquely located sites** (set in P3), and an NA-POPS model is available, without which counts cannot be corrected. Nothing about BAM detections, availability or EDR is used to determine eligibility, so no species is included or excluded because of how well BAM and CBBC agree. All eligible species are retained, but **only comparable species contribute to the primary density-agreement summaries**. The biologically motivated, judgment-based classification is defined centrally in P1 (`NON_COMPARABLE_SPECIES`; Section \@ref(settings-used)) and distinguishes species with readily interpreted breeding territories from those whose point-count detections cannot reliably be assigned to a comparable local territory. This is a statement about the compatibility of the two measurements, not about the quality of either survey method.
 
 `r length(spp_primary)` of `r nrow(species_selection)` candidate species have NA-POPS models and are compared (`r sum(species_selection$primary & species_selection$comparable)` comparable, `r sum(species_selection$primary & !species_selection$comparable)` non-comparable). `r sum(species_selection$primary & !species_selection$detected_nearby)` of them were never detected by a matched BAM survey. The species are listed in Table \@ref(tab:step1-species-2).
+
+
+### Why particular species are classified as non-comparable {#noncomparable-justifications}
+
+The following table covers **every code flagged as non-comparable in P1**, including species that do not meet the occurrence threshold in the current run. The reason is specifically why birds recorded on short point counts may not correspond closely to the density of breeding territories inferred from repeated spot mapping. Some of these birds do defend nests or territories; the flag does **not** mean they are wholly nonterritorial. The classification is a conservative ecological judgment made independently of the observed/expected ratios.
+
+```{r noncomparable-rationale-table}
+noncomparable_rationale <- tribble(
+  ~species, ~common_name, ~reason,
+  "AMCR", "American Crow", "Family groups and broad, mobile foraging ranges can extend well beyond a small mapped breeding plot.",
+  "AMGO", "American Goldfinch", "Loose territoriality, flocking and late/variable nesting make birds counted locally hard to pair with fixed mapped territories.",
+  "BANS", "Bank Swallow", "Colonial burrow nesting and extensive aerial foraging decouple local flight counts from nesting territories.",
+  "BARS", "Barn Swallow", "Defends nest sites but forages widely on the wing; birds passing a point may nest elsewhere.",
+  "BHCO", "Brown-headed Cowbird", "Brood parasite: females do not hold a conventional nesting territory, and birds visit multiple host territories.",
+  "BLJA", "Blue Jay", "Broad, overlapping home ranges and inconspicuous territorial boundaries make spot-mapped units hard to match to point-count birds.",
+  "CEDW", "Cedar Waxwing", "Social flocks, mobile feeding and relatively weak nesting-area defence make detections poor indicators of local territories.",
+  "CHSW", "Chimney Swift", "Nest-site-focused defence and wide-ranging aerial feeding mean birds overhead may not breed locally.",
+  "CLSW", "Cliff Swallow", "Dense nesting colonies and wide aerial feeding movements make counts of flying birds unlike mapped territory counts.",
+  "COGR", "Common Grackle", "Often nests in loose groups and mainly defends the nest vicinity; birds forage well beyond it.",
+  "CORA", "Common Raven", "Very large territories and far-ranging movements exceed the scale of most CBBC plots.",
+  "EUST", "European Starling", "Primarily defends nest cavities and feeds in mobile groups; observed birds need not belong to nests on the plot.",
+  "EVGR", "Evening Grosbeak", "Flocking, nomadic movements and weakly exclusive breeding areas complicate assignment to local territories.",
+  "HOSP", "House Sparrow", "Groups nest around buildings, defending mainly nest sites while sharing feeding areas.",
+  "MODO", "Mourning Dove", "Defends a localized nesting area but may travel far to feed; point-count birds need not occupy a local nesting territory.",
+  "NOFL", "Northern Flicker", "Nest-site defence and extensive ground-foraging movements can place counted birds far from their nesting areas.",
+  "NRWS", "Northern Rough-winged Swallow", "Defends nesting burrows but feeds widely in flight; aerial detections are poorly tied to local nests.",
+  "PISI", "Pine Siskin", "Irruptive, often flocking and mobile, with variable breeding locations and weakly exclusive feeding areas.",
+  "PUMA", "Purple Martin", "Often nests in colonies or clustered cavities and forages widely in the air, so local flight counts differ from nesting sites.",
+  "RECR", "Red Crossbill", "Nomadic, flocking and opportunistic breeding tied to seed crops makes fixed territory density a poor comparison.",
+  "ROPI", "Rock Pigeon", "Colonial or clustered nesting and wide-ranging flock foraging make point-count birds poorly attributable to local nests.",
+  "RUGR", "Ruffed Grouse", "Males have drumming territories, but peak drumming is usually earlier than the May–July point-count window; females and non-drumming birds are sampled differently.",
+  "TRES", "Tree Swallow", "Defends a nest cavity while feeding broadly in flight; detections at a point need not represent local breeding pairs.",
+  "WWCR", "White-winged Crossbill", "Nomadic flocks and opportunistic conifer-seed-driven breeding make a fixed, exclusive territory hard to enumerate."
+)
+
+# Fail loudly if someone edits the classification in P1 without updating its
+# corresponding explanation here, or vice versa.
+if (anyDuplicated(noncomparable_rationale$species) ||
+    !setequal(noncomparable_rationale$species, s1$non_comparable_species)) {
+  stop("README species justifications and P1 NON_COMPARABLE_SPECIES differ. Update both before knitting.")
+}
+
+noncomparable_rationale |>
+  mutate(`In this run` = if_else(species %in% spp_primary, "Yes", "No")) |>
+  arrange(desc(`In this run` == "Yes"), common_name) |>
+  select(Species = species, `Common name` = common_name, `In this run`,
+         `Why point counts and mapped territories may differ` = reason) |>
+  kable(caption = "Ecological justifications for every species flagged non-comparable in P1 (including species not eligible in this run)",
+        label = "noncomparable-rationales")
+```
 
 ## How point counts are compared with CBBC {#methods-ratio}
 
@@ -1292,7 +1348,7 @@ plot_size_leverage(fit = fit_4c, data = community_4) |>
 
 - **Plot size is a control, not a measured edge effect.** Most matched plots are 10–16 ha (Table \@ref(tab:step1-plots-1)): squares with sides of about 316 to 400 m. Over that range the share of a plot lying within one territory radius of its edge changes only modestly (about 53% to 44% for territories 100 m across), so a genuine edge effect could not change the ratio by more than a little. A large plot-size coefficient is therefore more likely to reflect a few larger plots with high leverage, or plots of different sizes differing in habitat, region or era. Table \@ref(tab:step3c-2) shows how much the coefficient depends on the plots larger than `r LARGE_PLOT_HA` ha. Any tendency to over-count edge territories affects almost every matched plot similarly, so it cannot be estimated from these plot sizes.
 - **Plot habitat is not included.** Habitat mismatch between a plot and its nearby points shows up as BAM detections of species absent from the plot, which raise the site's community ratio. The regression does not separate this from the other causes of disagreement.
-- **Matching radius.** The 1 km matching radius was chosen over 2 km because density declined about 11% from 0-1 km to 1-2 km at the same sites, as habitat shifted away from the plot's.
+- **Matching radius.** The original default of 1 km was chosen over 2 km because density declined about 11% from 0-1 km to 1-2 km at the same sites, as habitat shifted away from the plot's.
 
 ## Composition: do the datasets agree on which species are common? {#composition}
 
@@ -1410,7 +1466,7 @@ The median site has `r median(replication$surveys)` surveys from `r median(repli
 
 ## CBBC plot sizes
 
-**What this shows:** how large the spot-mapping plots are, compared with the area of the 1 km circle within which BAM surveys are matched. The larger the matching circle relative to the plot, the more the nearby points can sample habitat that is not on the plot.
+**What this shows:** how large the spot-mapping plots are, compared with the area of the `r s2$match_radius_m / 1000` km circle within which BAM surveys are matched. The larger the matching circle relative to the plot, the more the nearby points can sample habitat that is not on the plot.
 
 ```{r data-plots}
 kable(plot_sizes, digits = 1,
@@ -1521,7 +1577,7 @@ where *D*~*g*~ is the CBBC territory density at the grid (territories / km²), *
 
 **Effective area, *A*~*j*~.** The area within which the survey would have detected every bird if detection were perfect. It combines availability (the chance a bird sings or calls during the count, which depends on the count's duration, date and time of day), the species' effective detection radius (EDR), and the survey's distance limit; the formula is in Section \@ref(methods-ratio). For a species with EDR = 80 m, a 5-min unlimited-distance count with availability 0.8 has *A* = 0.8 × π × 0.08² ≈ 0.016 km² (about 1.6 ha). The same count truncated at 50 m has *A* ≈ 0.005 km², because only 1 − exp(−(50/80)²) ≈ 32% of the effective area lies within 50 m. That truncated count is *expected* to record about a third as many birds, which is exactly what truncation does to the observed count, so surveys run under different protocols are put on the same footing.
 
-**Which surveys go with which grid.** Every retained BAM survey within 1 km of a CBBC plot is assigned to the nearest plot, so a survey within 1 km of two plots is counted once, never twice.
+**Which surveys go with which grid.** Every retained BAM survey within `r s2$match_radius_m / 1000` km of a CBBC plot is assigned to its nearest eligible plot, so a survey within the matching radius of two plots is counted once, never twice.
 
 ### From counts to the two ratios
 
@@ -1563,13 +1619,13 @@ The count ratio (1.94) is close to G2's own ratio (20 / 9.60 = 2.08), even thoug
 
 ### CBBC plots of very different sizes
 
-Plot size does **not** weight either ratio directly. It enters only through density, which already divides territories by plot area. In the example, G1 (10 ha) and G2 (100 ha) are weighted by their surveys and densities, not their sizes: had G1 been a 100 ha plot with 30 territories, its density, and everything downstream, would be unchanged. That is usually what we want, because the BAM surveys sample the 1 km circle around a plot (about 314 ha) regardless of how large the plot is.
+Plot size does **not** weight either ratio directly. It enters only through density, which already divides territories by plot area. In the example, G1 (10 ha) and G2 (100 ha) are weighted by their surveys and densities, not their sizes: had G1 been a 100 ha plot with 30 territories, its density, and everything downstream, would be unchanged. That is usually what we want, because BAM surveys are selected from within a `r s2$match_radius_m / 1000` km radius of a plot (a circle of about `r round(match_circle_ha)` ha), regardless of the historical plot size; the surveys do not necessarily sample this circle uniformly.
 
 Plot size still matters in three ways that neither ratio adjusts for, because both treat CBBC density as known:
 
 - **Precision of the density.** On a 10 ha plot, one territory more or less changes density by 10 / km², so G1's 30 / km² could easily have been 20 or 40. On a 100 ha plot, one territory changes density by 1 / km².
 - **Edge effects.** Territories straddling the plot boundary are counted as fractions, and a "+" (part of a territory) is coded as 0.1 territory, which on a 10 ha plot is 1 territory / km² on its own. Small plots tend to overstate density because edge territories make up a larger share of them.
-- **Habitat match.** A 10 ha plot is about 3% of the 1 km matching circle, so the points around it can easily sample habitat the plot does not represent; a 100 ha plot covers about a third of the circle (Table \@ref(tab:step1-plots-1)).
+- **Habitat match.** A 10 ha plot is about `r round(100 * 10 / match_circle_ha)`% of the `r s2$match_radius_m / 1000` km matching circle, so nearby points can sample habitat that the plot does not represent; larger plots may be more representative but are not necessarily co-located with the point counts (Table \@ref(tab:step1-plots-1)).
 
 So small plots bring noisier, possibly inflated and less representative densities into both ratios, but no extra weight. This is why P1 drops plots under 10 ha, and why plot size is a term in the site-level regression (Section \@ref(plots-disagree)).
 
@@ -1608,7 +1664,7 @@ None of the data are included in this repository. The scripts read them from loc
 | Source | What is used | Notes |
 |---|---|---|
 | **Canadian Breeding Bird Census (CBBC)** | `PLOTS` and `SPECIES` tables: plot location, size, habitat, census year and visits; territory counts per species | Database documented in Kennedy et al. (1999), CWS Technical Report 342. Held by Environment and Climate Change Canada (Canadian Wildlife Service). Census records are filtered for coordinate quality, list completeness, effort, plot size, year and habitat in `P1_prepare_cbbc.R`; sites sharing identical retained coordinates are excluded from BAM matching in `P2_match_bam_surveys.R`. |
-| **BAM point-count database (v5)** | Human point counts (no ARU recordings, no eBird checklists) within 1 km of each retained CBBC plot, with survey date, time, duration, distance limit and counts | DuckDB build `03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09`. Access through the BAM Project's data-sharing process. |
+| **BAM point-count database (v5)** | Human point counts (no ARU recordings, no eBird checklists) within `r s2$match_radius_m / 1000` km of each retained CBBC plot, with survey date, time, duration, distance limit and counts | DuckDB build `03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09`. Access through the BAM Project's data-sharing process. |
 | **NA-POPS** | Species availability (removal) and distance (EDR) models | Through the [`napops`](https://github.com/na-pops/napops) R package; the results release used is reported in Section \@ref(napops-corrections). The intercept-only distance model is used. |
 | **PIF corrections** | `Population_estimates_workflow_support.xlsx`: PIF time-of-day adjustment (`PIF_time_of_day`), maximum detection distance (`PIF_MDD`) and pair adjustment (`PIF_pair`) per species | Corrections used in PIF continental population estimates (Blancher et al. 2013; Stanton et al. 2019). Matched to NA-POPS species by common name in `P4_pif_corrections.R`, where MDD is used as an expert estimate of EDR. The pair adjustment is listed but not used (Section \@ref(pif-vs-napops)). |
 | **Bird Conservation Regions** | Boundaries for the site map | Optional; the map is drawn without them if the file is absent. |
@@ -1629,7 +1685,7 @@ The analysis has four preparation scripts, each run once with its output cached,
 | Step | Script | Prepares | Cached output (in `output/`) |
 |---|---|---|---|
 | 1 | `script/P1_prepare_cbbc.R` | CBBC coordinates, census filters, densities, species-code rules and flags for SITEIDs sharing recorded coordinates | `P1_cbbc_prepared.rds` |
-| 2 | `script/P2_match_bam_surveys.R` | BAM surveys within 1 km, survey filters, exclusion of entire shared-coordinate groups, unique nearest-site assignment, exclusion audit, and counts | `P2_bam_matched.rds` |
+| 2 | `script/P2_match_bam_surveys.R` | BAM surveys within `r s2$match_radius_m / 1000` km, survey filters, exclusion of entire shared-coordinate groups, unique nearest-site assignment, exclusion audit, and counts | `P2_bam_matched.rds` |
 | 3 | `script/P3_napops_corrections.R` | Species with CBBC territories at **`r s3$min_sites_cbbc` or more final sites**, NA-POPS availability, EDR and effective area for every survey and species | `P3_napops_corrections.rds` |
 | 4 | `script/P4_pif_corrections.R` | PIF time-of-day and maximum-detection-distance effective areas (and two hybrids) for the same surveys and species | `P4_pif_corrections.rds` |
 | 5 | `README.Rmd` | This report, knitted to `README.md` | figures in `README_files/` |
@@ -1641,7 +1697,7 @@ Each script and the report define their settings as constants at the top, and re
 1. Open the RStudio project (the `.Rproj` file in the repository root). All paths inside the project are built with `here::here()`, so they resolve from the project root, whichever folder a script is run from.
 2. Place the input data in `data/`, or set the data paths at the top of each preparation script (CBBC tables in P1, the BAM DuckDB file in P2, the PIF table in P4), and optionally the BCR file at the top of `README.Rmd`.
 3. Install the R packages used: `tidyverse`, `readxl`, `sf`, `DBI`, `duckdb`, `suncalc`, `lutz`, `napops`, `rappdirs`, `here`, `knitr` and `bookdown`.
-4. Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R`, `script/P3_napops_corrections.R` and `script/P4_pif_corrections.R`, **in that order**. Each writes its output to `output/`. The new P2 excludes shared-coordinate groups and performs nearest-site assignment before P3 selects species at the configured minimum number of final sites (`r s3$min_sites_cbbc` in this report). **Re-run all four scripts after updating this workflow**; older cached `.rds` files are incompatible. Each later script reads the earlier outputs.
+4. Run `script/P1_prepare_cbbc.R`, `script/P2_match_bam_surveys.R`, `script/P3_napops_corrections.R` and `script/P4_pif_corrections.R`, **in that order**. Each writes its output to `output/`. The new P2 excludes shared-coordinate groups and performs nearest-site assignment before P3 selects species at the configured minimum number of final sites (`r s3$min_sites_cbbc` in this report). **After changing only `NON_COMPARABLE_SPECIES` in P1, rerun P1, P3 and P4** so the cached species classes are updated. P2 may be reused if the coordinates, site filters, species recodes and BAM matching settings have not changed; otherwise rerun P2 as well. Each later script reads the earlier outputs.
 5. Knit `README.Rmd` (in the repository root) with the Knit button. This writes both `README.html` and `README.md` (and Markdown figures in `README_files/`); commit the `.md` and figure folder so GitHub can display the regenerated results. All numerical summaries, tables, confidence intervals and figures are recomputed from the revised caches.
 
 Because the data are not public, `README.md` shows the results of the author's local run.

@@ -147,18 +147,25 @@ VIREO_SPLIT_LAT  <- 56             #   VIREO_SPLIT_LAT = CAVI, otherwise BHVI
 TRAILL_CODE    <- "TRFL"
 TRAILL_SPECIES <- c("ALFL", "WIFL")
 
-# Species whose spot-mapped territories are a poor proxy for birds on a point
-# count: kept in outputs but flagged (comparable = FALSE) and summarized
-# separately in the report
+# Species for which a mapped breeding territory is a poor proxy for the birds
+# recorded by a breeding-season point count (e.g., local nest defence versus
+# broad foraging movements, flocking, or seasonal signalling differences).
+# They remain in the candidate dataset and all-species results, but are flagged
+# comparable = FALSE and omitted from the main comparable-species summaries.
+# The README provides a per-species justification for EVERY code in this list.
 NON_COMPARABLE_SPECIES <- c(
-  "BHCO",                                          # brood parasite: holds no nesting territory
-  "COGR", "EUST", "HOSP", "ROPI",                  # colonial / semi-colonial nesters
-  # "RWBL", "BRBL", "YHBL",                          # polygynous or colonial blackbirds
+  "BHCO",                                          # brood parasite: no nesting territory to enumerate
+  "COGR", "EUST", "HOSP", "ROPI",                  # nest-site defence, loose colonies and/or communal foraging
+  "BLJA",                                          # overlapping ranges; weakly delineated territorial boundaries
+  "MODO",                                          # defends a nest area; may forage far from nesting site
+  "NOFL",                                          # cavity/nest-site defence; wide-ranging ground foraging
+  "RUGR",                                          # drumming-male territories; seasonal mismatch with point counts
   "CEDW", "AMGO", "PISI", "EVGR", "RECR", "WWCR",  # flocking, weakly territorial or nomadic
-  "BARS", "CLSW", "TRES", "NRWS", "BANS", "PUMA",  # swallows / martins: aerial foragers,
-  "CHSW",                                          #   often colonial; counted in flight
-  "AMCR", "CORA"                                  # territories far larger than census plots
-  #"RUGR"                                           # males drum mostly in spring, before the point-count season: dawn counts miss them
+  "BARS", "CLSW", "TRES", "NRWS", "BANS", "PUMA",  # aerial foragers, often nest-site defenders or colonial
+  "CHSW",                                          # mobile aerial forager; nest-site defence
+  "AMCR", "CORA"                                  # large territories/ranges relative to most CBBC plots
+  # RWBL remains comparable: males defend distinct territories, though polygyny
+  # means one mapped male territory is not equivalent to one counted individual.
 )
 
 # ------------------------------------------------------------------------------
