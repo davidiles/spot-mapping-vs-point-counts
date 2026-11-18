@@ -99,10 +99,13 @@ brings point counts closer to the CBBC censuses (Section
 
 ## 1.1 Key findings
 
-All results below use only the **36 final CBBC locations** after
-excluding every historical plot in a group of identical recorded
-coordinates. Species must occur in **at least 10 of these locations**.
-All numerical results below are computed for this restricted sample.
+All results below use **36 final CBBC locations**, after excluding CBBC
+plots with inadequate effort, those with no nearby point counts, and
+several distinct plots with identical coordinates that could not be
+uniquely assigned to paired point counts. To be included in this
+analysis, species must have been observed in **at least 10 of these
+remaining CBBC locations**. All numerical results below are computed for
+this restricted sample.
 
 - **NA-POPS-corrected point counts vs spot mapping.** For the 18
   comparable species, NA-POPS-corrected point-count density is a median
