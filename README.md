@@ -2,7 +2,7 @@ Do NA-POPS-corrected point counts reproduce spot-mapping densities?
 Canadian Breeding Bird Census vs BAM
 ================
 David Iles, assisted by Opus 5.5 and GPT-6 Sol
-18 November 2026
+19 November 2026
 
 - [1 Summary](#1-summary)
   - [1.1 Key findings](#11-key-findings)
@@ -104,8 +104,9 @@ plots with inadequate effort, those with no nearby point counts, and
 several distinct plots with identical coordinates that could not be
 uniquely assigned to paired point counts. To be included in this
 analysis, species must have been observed in **at least 10 of these
-remaining CBBC locations**. All numerical results below are computed for
-this restricted sample.
+remaining CBBC locations**, so that rare species, whose results rest on
+a few plots, do not dominate the summaries. All numerical results below
+are computed for this restricted sample.
 
 - **NA-POPS-corrected point counts vs spot mapping.** For the 18
   comparable species, NA-POPS-corrected point-count density is a median
@@ -173,8 +174,12 @@ Even with perfect corrections the ratio need not be 1:
   changed in between.
 - **Habitat.** Points within 2 km of a plot can sample habitat the plot
   does not represent. Point counts in this analysis therefore represent
-  a broader collection of habitats than CBBC plots that were selected
-  within relatively uniform habitats.
+  a broader collection of habitats than CBBC plots, which were selected
+  within relatively uniform habitats. The radius is deliberately broad,
+  because CBBC coordinates are imprecise and the aim is density
+  correspondence at broad spatial scales, so the comparison suits
+  broadly distributed species best (Section
+  <a href="#methods-data">3.1</a>).
 
 The 95% intervals are sampling intervals: they take the NA-POPS
 corrections and CBBC densities as given, and do not include uncertainty
@@ -463,6 +468,18 @@ plots in 6 coordinate groups**; **36 uniquely located CBBC sites**
 remain. Each retained BAM survey is assigned once to its nearest
 eligible plot *in P2*, before species selection.
 
+**Why a 2 km radius.** The comparison is of density correspondence at
+broad spatial scales, not plot by plot. CBBC coordinates are themselves
+imprecise (often given only to the minute, about ± 1.8 km, or placed at
+a nearby town), so a tighter radius would not match point counts to the
+plot more closely, and a wider one gives more surveys per site. The cost
+is that the points sample a wider range of habitats than the plot: an
+earlier paired test at the same sites found corrected densities about
+11% lower at 1–2 km than at 0–1 km, with mature-forest species declining
+and edge and early-successional species increasing. The approach
+therefore works best for species that are broadly distributed across the
+habitats around the plots, and least well for habitat specialists.
+
 **Why spot mapping.** CBBC observers visited each plot repeatedly (at
 least the minimum number of visits set in P1; Table
 <a href="#tab:step1a-1">5.1</a>) and mapped territories, so CBBC
@@ -504,17 +521,22 @@ where spot mapping found none.
 **Scope.** Species are selected if CBBC territories were recorded at
 **10 or more of the 36 final, uniquely located sites** (set in P3), and
 an NA-POPS model is available, without which counts cannot be corrected.
-Nothing about BAM detections, availability or EDR is used to determine
-eligibility, so no species is included or excluded because of how well
-BAM and CBBC agree. All eligible species are retained, but **only
-comparable species contribute to the primary density-agreement
-summaries**. The biologically motivated, judgment-based classification
-is defined centrally in P1 (`NON_COMPARABLE_SPECIES`; Section
-<a href="#settings-used">7.5</a>) and distinguishes species with readily
-interpreted breeding territories from those whose point-count detections
-cannot reliably be assigned to a comparable local territory. This is a
-statement about the compatibility of the two measurements, not about the
-quality of either survey method.
+The threshold keeps rare species out: a species with territories at only
+a few sites has a ratio that rests on one or two plots, and a few such
+species could dominate the summaries across species. It also focuses the
+comparison on broadly distributed species, the ones a broad-scale
+comparison with a 2 km matching radius suits best (Section
+<a href="#methods-data">3.1</a>). Nothing about BAM detections,
+availability or EDR is used to determine eligibility, so no species is
+included or excluded because of how well BAM and CBBC agree. All
+eligible species are retained, but **only comparable species contribute
+to the primary density-agreement summaries**. The biologically
+motivated, judgment-based classification is defined centrally in P1
+(`NON_COMPARABLE_SPECIES`; Section <a href="#settings-used">7.5</a>) and
+distinguishes species with readily interpreted breeding territories from
+those whose point-count detections cannot reliably be assigned to a
+comparable local territory. This is a statement about the compatibility
+of the two measurements, not about the quality of either survey method.
 
 26 of 26 candidate species have NA-POPS models and are compared (18
 comparable, 8 non-comparable). 0 of them were never detected by a
@@ -916,9 +938,13 @@ census.
   its nearby points shows up as BAM detections of species absent from
   the plot, which raise the site’s community ratio. The regression does
   not separate this from the other causes of disagreement.
-- **Matching radius.** The original default of 1 km was chosen over 2 km
-  because density declined about 11% from 0-1 km to 1-2 km at the same
-  sites, as habitat shifted away from the plot’s.
+- **Matching radius.** Points are matched within 2 km of a plot (Section
+  <a href="#methods-data">3.1</a>), so most of each site’s point counts
+  lie off the plot. An earlier paired test at the same sites found
+  corrected densities about 11% lower at 1–2 km than at 0–1 km, with
+  mature-forest species declining and edge and early-successional
+  species increasing, as habitat shifted away from the plot’s. The
+  regression cannot separate this from the other causes of disagreement.
 
 ## 4.7 Composition: do the datasets agree on which species are common?
 
@@ -1124,6 +1150,7 @@ assignment
 |        250 |                                     8 |
 |        500 |                                    14 |
 |       1000 |                                    26 |
+|       2000 |                                    36 |
 
 <span id="tab:step1a-3"></span>Table 5.3: CBBC sites with at least one
 retained BAM survey within each distance of the plot coordinate
@@ -1720,7 +1747,7 @@ author’s local run.
     ##   ..$ traill_code           : chr "TRFL"
     ##   ..$ traill_species        : chr [1:2] "ALFL" "WIFL"
     ##   ..$ non_comparable_species: chr [1:24] "BHCO" "COGR" "EUST" "HOSP" "ROPI" "BLJA" "MODO" "NOFL" "RUGR" "CEDW" ...
-    ##   ..$ created               : POSIXct[1:1], format: "2026-11-18 13:28:07"
+    ##   ..$ created               : POSIXct[1:1], format: "2026-11-19 11:43:11"
     ##  $ P2:List of 11
     ##   ..$ bam_db                                 : chr "03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09.duckdb"
     ##   ..$ visit_filter                           : chr "NOT flag_any AND NOT flag_dup"
@@ -1732,7 +1759,7 @@ author’s local run.
     ##   ..$ exclude_shared_coordinates             : logi TRUE
     ##   ..$ assign_nearest_before_species_selection: logi TRUE
     ##   ..$ distance_method                        : chr "haversine, R = 6371008.8 m"
-    ##   ..$ created                                : POSIXct[1:1], format: "2026-11-18 13:28:10"
+    ##   ..$ created                                : POSIXct[1:1], format: "2026-11-19 11:43:16"
     ##  $ P3:List of 8
     ##   ..$ min_sites_cbbc  : num 10
     ##   ..$ avail_model     : chr "best"
@@ -1741,7 +1768,7 @@ author’s local run.
     ##   ..$ edr_samples     : num 1000
     ##   ..$ napops_version  : chr "1.1.2"
     ##   ..$ napops_data_date: chr "2024-03-05"
-    ##   ..$ created         : POSIXct[1:1], format: "2026-11-18 13:28:43"
+    ##   ..$ created         : POSIXct[1:1], format: "2026-11-19 11:43:47"
     ##  $ P4:List of 7
     ##   ..$ pif_table           : chr "Population_estimates_workflow_support.xlsx"
     ##   ..$ pif_ref_duration_min: num 3
@@ -1749,7 +1776,7 @@ author’s local run.
     ##   ..$ pif_name_fix        : Named chr [1:3] "Northern House Wren" "Western Flycatcher" "Canada Jay"
     ##   ..$ pif_pair_used       : logi FALSE
     ##   ..$ pif_area            : chr "p_pif x pi x MDD^2 x (1 - exp(-(distance limit / MDD)^2)): MDD as EDR"
-    ##   ..$ created             : POSIXct[1:1], format: "2026-11-18 13:28:44"
+    ##   ..$ created             : POSIXct[1:1], format: "2026-11-19 11:43:48"
 
     ## R version 4.5.2 (2025-10-31 ucrt)
     ## Platform: x86_64-w64-mingw32/x64

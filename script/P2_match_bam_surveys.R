@@ -8,12 +8,18 @@
 # sharing identical recorded site coordinates, assigns each remaining survey
 # to its nearest unambiguous CBBC site, and attaches the counts.
 #
-# Matching radius: 1 km. Not smaller, because CBBC coordinates are often given
-# only to the minute or refer to a nearby town, and tighter radii leave too few
-# surveys per site. Not larger: a paired test on the same sites found corrected
-# densities ~11% lower at 1-2 km than at 0-1 km, with mature-forest species
-# declining and edge / early-successional species increasing, i.e. points
-# further out sample different habitat from the plot.
+# Matching radius: 2 km. The comparison is of density correspondence at broad
+# spatial scales, not plot by plot:
+#   - CBBC coordinates are themselves imprecise (often given only to the
+#     minute, about +/- 1.8 km, or placed at a nearby town), so a tighter
+#     radius would not give a tighter match to the plot.
+#   - A larger radius gives more surveys per site.
+# The cost is habitat mismatch: an earlier paired test on the same sites found
+# corrected densities ~11% lower at 1-2 km than at 0-1 km, with mature-forest
+# species declining and edge / early-successional species increasing, i.e.
+# points further out sample habitat that differs from the plot's. So the
+# approach suits species that are broadly distributed across the habitats
+# around the plots better than habitat specialists.
 #
 # Survey filters, each recorded in survey_funnel so the report can show how
 # the sample shrinks at every step:
@@ -180,7 +186,7 @@ unambiguous_pairs <- eligible_pairs |>
 # Assign each survey only once here (rather than later in README.Rmd): P3's
 # species-occurrence threshold and EVERY reported comparison now use exactly
 # the same final set of CBBC sites, including any future non-identical sites
-# that happen to fall within the same 1-km survey matching circle.
+# that happen to fall within the same survey matching circle (MATCH_RADIUS_M).
 site_survey <- unambiguous_pairs |>
   group_by(survey_id) |>
   slice_min(order_by = dist_m, n = 1, with_ties = FALSE) |>

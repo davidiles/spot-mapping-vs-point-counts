@@ -57,7 +57,14 @@ OUT_PATH <- file.path(OUT_DIR, "P3_napops_corrections.rds")
 # Constants
 # ------------------------------------------------------------------------------
 
-MIN_SITES_CBBC <- 10                # species needs territories at >= 5 FINAL retained, distinct CBBC locations
+# A species is compared only if CBBC territories were recorded at >= this many
+# FINAL retained, distinct CBBC sites (after P2's coordinate exclusion and
+# nearest-site assignment). Rare species, with territories at only a few
+# sites, give ratios that rest on one or two plots and could dominate the
+# summaries across species. The 2 km matching radius (P2) also makes the
+# comparison one of broad-scale density correspondence, which suits species
+# that are broadly distributed.
+MIN_SITES_CBBC <- 10
 
 AVAIL_MODEL    <- "best"           # removal model with lowest AIC (uses od and tssr)
 
@@ -133,7 +140,7 @@ napops_ok    <- napops_table |>
 # define songbirds.
 # The occurrence threshold counts distinct CBBC SITEIDs AFTER shared-coordinate
 # exclusions and nearest-survey assignment in P2. These are the final sampled
-# locations (26 in the reference run), not the original 41 raw matched plots.
+# locations, not all plots with surveys within the matching radius.
 # This selects SPECIES only. Every selected species is then compared over all
 # final CBBC grids, including grids where spot mapping found no territories.
 # (Traill's Flycatcher is a pre-split combination, not a species to compare)
