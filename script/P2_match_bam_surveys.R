@@ -56,7 +56,8 @@ library(lutz)     # time zone of each survey location
 ANALYSIS_DIR <-  here::here()
 
 P1_PATH     <- file.path(ANALYSIS_DIR, "output", "P1_cbbc_prepared.rds")
-BAM_DB_PATH <- "C:/Users/IlesD/Documents/Data_Local/BAM_v5/BAMDataset_duckdb/03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09.duckdb"
+BAM_DATA_PATH = "G:/Shared drives/BAM_AvianData/BAMDataset" # may want to change to local directory for users who cannot access GDrive
+BAM_DB_PATH <- file.path(BAM_DATA_PATH, "/03_BAMDataset_WT-2026-08-26_EBd-Jun-2026_PRISM-2026-10-09.duckdb")
 
 OUT_DIR  <- file.path(ANALYSIS_DIR, "output")
 OUT_PATH <- file.path(OUT_DIR, "P2_bam_matched.rds")

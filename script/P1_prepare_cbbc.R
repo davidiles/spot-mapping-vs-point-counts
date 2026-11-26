@@ -47,8 +47,7 @@ library(sf)       # UTM -> lat/lon for the GRIDREF check
 # Paths
 # ------------------------------------------------------------------------------
 
-ROOT              <- "C:/Users/IlesD/OneDrive - EC-EC/Iles"
-CBBC_TABLE_DIR    <- file.path(ROOT, "Projects/Landbirds/spot-mapping-vs-point-counts/data/tables")
+CBBC_TABLE_DIR    <- file.path("data", "CBBC")
 CBBC_PLOTS_PATH   <- file.path(CBBC_TABLE_DIR, "PLOTS.xlsx")
 CBBC_SPECIES_PATH <- file.path(CBBC_TABLE_DIR, "SPECIES.xlsx")
 
